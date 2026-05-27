@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import newsRoutes from './routes/newsRoutes';
 import { errorHandler } from './middleware/errorHandler';
+import { initIngestionScheduler, runIngestionNow } from './jobs/ingestionJob';
 
 // Load environmental variables
 dotenv.config();
@@ -26,6 +27,13 @@ app.get('/health', (req, res) => {
 app.use(errorHandler);
 
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`⚡️ [server]: Server is running at http://localhost:${PORT}`);
+  
+  // Initialize dynamic background news syncing scheduler
+  initIngestionScheduler();
+
+  // Proactively run an initial live news sync on server startup asynchronously
+  console.log('⚡️ [server]: Initiating initial live news ingestion...');
+  runIngestionNow();
 });

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '../config/db';
+import { crawlCategorySourcesOnDemand } from '../jobs/ingestionJob';
 
 export const getArticles = async (req: Request, res: Response) => {
   try {
@@ -14,6 +15,13 @@ export const getArticles = async (req: Request, res: Response) => {
           mode: 'insensitive',
         },
       };
+
+      // Asynchronously trigger a background targeted priority sync for this category
+      // It executes without blocking the API call, so the user receives a lightning-fast response!
+      console.log(`⚡️ [API]: User requested "${category}". Triggering priority on-demand crawler...`);
+      crawlCategorySourcesOnDemand(String(category)).catch((err) => {
+        console.error(`❌ [API]: Background priority sync failed:`, err.message);
+      });
     }
 
     if (isTopStory !== undefined) {

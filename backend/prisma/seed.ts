@@ -6,7 +6,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 async function main() {
-  console.log('🌱 Starting database seeding...');
+  console.log('🌱 Reseeding database with highly active Indian and Global RSS Sources...');
 
   const connectionString = process.env.DATABASE_URL;
   const pool = new Pool({ connectionString });
@@ -14,9 +14,10 @@ async function main() {
   const prisma = new PrismaClient({ adapter });
 
   try {
-    // 1. Clear existing data to prevent duplicates
+    // 1. Clear existing data to prevent duplicates and clean up inactive feeds
     console.log('Clearing existing data...');
     await prisma.article.deleteMany({});
+    await prisma.newsSource.deleteMany({});
     await prisma.category.deleteMany({});
 
     // 2. Define standard categories matching NewsCategory
@@ -39,137 +40,101 @@ async function main() {
       createdCategories[cat.name] = created;
     }
 
-    // 3. Define and Insert Top Story
-    console.log('Inserting top story...');
-    await prisma.article.create({
-      data: {
-        title: 'RBI Announces New Monetary Policy Reforms Amid Global Inflation Concerns',
-        summary: 'In a sweeping set of changes, the central bank has adjusted the repo rate and introduced new guidelines for digital transactions to stabilize the market.',
-        content: 'In a sweeping set of changes, the central bank has adjusted the repo rate and introduced new guidelines for digital transactions to stabilize the market. This policy shift comes amidst mounting global inflation and supply constraints.',
-        url: 'https://reuters.com/news/rbi-monetary-policy-reforms',
-        source: 'Reuters',
-        isTopStory: true,
-        isTopDevelopment: false,
-        publishedAt: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 hours ago
-        categoryId: createdCategories['Business & Economy'].id
-      }
-    });
-
-    // 4. Define and Insert Top Developments
-    console.log('Inserting top developments...');
-    const developments = [
+    // 3. Define and Insert 10-15 highly active premium RSS feeds
+    console.log('Inserting highly active RSS News Sources...');
+    const sourcesData = [
+      // --- VERY ACTIVE INDIAN NEWS SOURCES ---
       {
-        title: 'Supreme Court Issues Landmark Ruling on Electoral Bonds',
-        category: 'Politics & Governance',
-        source: 'The Hindu',
-        url: 'https://thehindu.com/news/supreme-court-ruling-electoral-bonds',
-        hoursAgo: 4
+        name: 'Google News India National (Politics & Gov)',
+        rssUrl: 'https://news.google.com/rss/headlines/section/geo/IN?hl=en-IN&gl=IN&ceid=IN:en',
+        categoryName: 'Politics & Governance'
       },
       {
-        title: 'Semiconductor Manufacturing Subsidies Increased by $2 Billion',
-        category: 'Technology & Infrastructure',
-        source: 'Economic Times',
-        url: 'https://economictimes.com/news/semiconductor-manufacturing-subsidies',
-        hoursAgo: 5
+        name: 'The Hindu National News',
+        rssUrl: 'https://www.thehindu.com/news/national/feeder/default.rss',
+        categoryName: 'Politics & Governance'
       },
       {
-        title: 'Border Tensions Escalate: Diplomatic Talks Scheduled for Next Week',
-        category: 'National Security & Defense',
-        source: 'AP',
-        url: 'https://ap.org/news/border-tensions-escalate-talks',
-        hoursAgo: 7
+        name: 'Reserve Bank of India (RBI Press Releases)',
+        rssUrl: 'https://news.google.com/rss/search?q=Reserve+Bank+of+India+RBI&hl=en-IN&gl=IN&ceid=IN:en',
+        categoryName: 'Business & Economy'
+      },
+      {
+        name: 'Securities and Exchange Board of India (SEBI)',
+        rssUrl: 'https://news.google.com/rss/search?q=SEBI+Securities+and+Exchange+Board+of+India&hl=en-IN&gl=IN&ceid=IN:en',
+        categoryName: 'Business & Economy'
+      },
+      {
+        name: 'Economic Times (Indian Economy)',
+        rssUrl: 'https://economictimes.indiatimes.com/news/economy/rssfeeds/1373380680.cms',
+        categoryName: 'Business & Economy'
+      },
+      {
+        name: 'ISRO strategic space science updates',
+        rssUrl: 'https://news.google.com/rss/search?q=ISRO+Indian+Space+Research+Organisation&hl=en-IN&gl=IN&ceid=IN:en',
+        categoryName: 'Science & Environment'
+      },
+      // --- GLOBAL Reputed & Technology Feeds ---
+      {
+        name: 'Reuters World News',
+        rssUrl: 'https://news.google.com/rss/search?q=source:Reuters',
+        categoryName: 'World Affairs'
+      },
+      {
+        name: 'Associated Press (AP)',
+        rssUrl: 'https://news.google.com/rss/search?q=source:Associated_Press',
+        categoryName: 'World Affairs'
+      },
+      {
+        name: 'BBC News Global',
+        rssUrl: 'https://news.google.com/rss/search?q=source:BBC_News',
+        categoryName: 'World Affairs'
+      },
+      {
+        name: 'CNBC Finance',
+        rssUrl: 'https://search.cnbc.com/rs/search/combined/searchResults.rss?query=finance',
+        categoryName: 'Business & Economy'
+      },
+      {
+        name: 'TechCrunch',
+        rssUrl: 'https://techcrunch.com/feed/',
+        categoryName: 'Technology & Infrastructure'
+      },
+      {
+        name: 'Krebs on Security',
+        rssUrl: 'https://krebsonsecurity.com/feed/',
+        categoryName: 'National Security & Defense'
+      },
+      {
+        name: 'Indian Defense & Military Intelligence',
+        rssUrl: 'https://news.google.com/rss/search?q=defence+India+military+national+security&hl=en-IN&gl=IN&ceid=IN:en',
+        categoryName: 'National Security & Defense'
+      },
+      {
+        name: 'India Crime & Judicial Updates',
+        rssUrl: 'https://news.google.com/rss/search?q=crime+justice+court+India&hl=en-IN&gl=IN&ceid=IN:en',
+        categoryName: 'Crime & Justice'
+      },
+      {
+        name: 'The Verge',
+        rssUrl: 'https://www.theverge.com/rss/index.xml',
+        categoryName: 'Technology & Infrastructure'
       }
     ];
 
-    for (const dev of developments) {
-      await prisma.article.create({
+    for (const src of sourcesData) {
+      await prisma.newsSource.create({
         data: {
-          title: dev.title,
-          summary: `${dev.title} coverage from ${dev.source}.`,
-          content: `Complete coverage of: ${dev.title}. Discussions and implications are ongoing.`,
-          url: dev.url,
-          source: dev.source,
-          isTopStory: false,
-          isTopDevelopment: true,
-          publishedAt: new Date(Date.now() - dev.hoursAgo * 60 * 60 * 1000),
-          categoryId: createdCategories[dev.category].id
+          name: src.name,
+          rssUrl: src.rssUrl,
+          categoryName: src.categoryName,
+          isActive: true
         }
       });
     }
 
-    // 5. Define and Insert Standard Articles
-    console.log('Inserting standard articles...');
-    const standardArticles = [
-      {
-        title: 'Parliament Passes New Infrastructure Bill Aimed at Rural Connectivity',
-        category: 'Politics & Governance',
-        source: 'PIB',
-        url: 'https://pib.gov/news/parliament-passes-infrastructure-bill',
-        hoursAgo: 1
-      },
-      {
-        title: 'Major Layoffs Announced at Top Tech Firms Amid AI Transition',
-        category: 'Business & Economy',
-        source: 'Financial Times',
-        url: 'https://ft.com/news/tech-firms-layoffs-ai-transition',
-        hoursAgo: 3
-      },
-      {
-        title: 'CBI Launches Investigation into Multi-State Cyber Fraud Ring',
-        category: 'Crime & Justice',
-        source: 'Indian Express',
-        url: 'https://indianexpress.com/news/cbi-investigation-cyber-fraud-ring',
-        hoursAgo: 4
-      },
-      {
-        title: 'Global Supply Chain Disruptions Expected Following New Trade Tariffs',
-        category: 'World Affairs',
-        source: 'Bloomberg',
-        url: 'https://bloomberg.com/news/global-supply-chain-tariffs',
-        hoursAgo: 6
-      },
-      {
-        title: 'Breakthrough in Fusion Energy Could Redefine Climate Goals',
-        category: 'Science & Environment',
-        source: 'BBC',
-        url: 'https://bbc.com/news/breakthrough-fusion-energy-climate',
-        hoursAgo: 8
-      },
-      {
-        title: 'Cyber Warfare Command Intercepts Coordinated Attack on Grid',
-        category: 'National Security & Defense',
-        source: 'Wired',
-        url: 'https://wired.com/news/cyber-warfare-grid-attack',
-        hoursAgo: 10
-      },
-      {
-        title: 'New AI Regulations Proposed to Protect Enterprise Data',
-        category: 'Technology & Infrastructure',
-        source: 'TechCrunch',
-        url: 'https://techcrunch.com/news/new-ai-regulations-proposed',
-        hoursAgo: 12
-      }
-    ];
-
-    for (const art of standardArticles) {
-      await prisma.article.create({
-        data: {
-          title: art.title,
-          summary: `Latest details on ${art.title}.`,
-          content: `Full analysis and reporting on: ${art.title}. Local officials and industry experts continue to weigh in.`,
-          url: art.url,
-          source: art.source,
-          isTopStory: false,
-          isTopDevelopment: false,
-          publishedAt: new Date(Date.now() - art.hoursAgo * 60 * 60 * 1000),
-          categoryId: createdCategories[art.category].id
-        }
-      });
-    }
-
-    console.log('✅ Seeding completed successfully!');
+    console.log('✅ Highly active feeds seeded successfully!');
   } finally {
-    // Gracefully disconnect and shut down the postgres connection client pool
     await prisma.$disconnect();
     await pool.end();
   }

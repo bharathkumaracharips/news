@@ -8,6 +8,7 @@ const cors_1 = __importDefault(require("cors"));
 const dotenv_1 = __importDefault(require("dotenv"));
 const newsRoutes_1 = __importDefault(require("./routes/newsRoutes"));
 const errorHandler_1 = require("./middleware/errorHandler");
+const ingestionJob_1 = require("./jobs/ingestionJob");
 // Load environmental variables
 dotenv_1.default.config();
 const app = (0, express_1.default)();
@@ -24,6 +25,11 @@ app.get('/health', (req, res) => {
 // Error handling middleware
 app.use(errorHandler_1.errorHandler);
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
     console.log(`⚡️ [server]: Server is running at http://localhost:${PORT}`);
+    // Initialize dynamic background news syncing scheduler
+    (0, ingestionJob_1.initIngestionScheduler)();
+    // Proactively run an initial live news sync on server startup asynchronously
+    console.log('⚡️ [server]: Initiating initial live news ingestion...');
+    (0, ingestionJob_1.runIngestionNow)();
 });

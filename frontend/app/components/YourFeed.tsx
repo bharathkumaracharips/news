@@ -1,9 +1,9 @@
 'use client';
 
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import styles from './YourFeed.module.css';
 
-// Backend Category Structure as requested
 export enum NewsCategory {
   POLITICS = 'Politics & Governance',
   BUSINESS = 'Business & Economy',
@@ -14,82 +14,52 @@ export enum NewsCategory {
   SECURITY = 'National Security & Defense',
 }
 
-// Dummy data for the UI
-const topStory = {
-  title: "RBI Announces New Monetary Policy Reforms Amid Global Inflation Concerns",
-  excerpt: "In a sweeping set of changes, the central bank has adjusted the repo rate and introduced new guidelines for digital transactions to stabilize the market.",
-  category: NewsCategory.BUSINESS,
-  source: "Reuters",
-  time: "2 hours ago",
-};
+interface DBArticle {
+  id: string;
+  title: string;
+  summary: string | null;
+  content: string;
+  source: string;
+  url: string;
+  isTopStory: boolean;
+  isTopDevelopment: boolean;
+  publishedAt: string;
+  category: {
+    id: string;
+    name: string;
+  };
+}
 
-const topDevelopments = [
-  {
-    title: "Supreme Court Issues Landmark Ruling on Electoral Bonds",
-    category: NewsCategory.POLITICS,
-    source: "The Hindu",
-    time: "4 hours ago",
-  },
-  {
-    title: "Semiconductor Manufacturing Subsidies Increased by $2 Billion",
-    category: NewsCategory.TECHNOLOGY,
-    source: "Economic Times",
-    time: "5 hours ago",
-  },
-  {
-    title: "Border Tensions Escalate: Diplomatic Talks Scheduled for Next Week",
-    category: NewsCategory.SECURITY,
-    source: "AP",
-    time: "7 hours ago",
-  },
-];
-
-const standardArticles = [
-  {
-    title: "Parliament Passes New Infrastructure Bill Aimed at Rural Connectivity",
-    category: NewsCategory.POLITICS,
-    source: "PIB",
-    time: "1 hour ago",
-  },
-  {
-    title: "Major Layoffs Announced at Top Tech Firms Amid AI Transition",
-    category: NewsCategory.BUSINESS,
-    source: "Financial Times",
-    time: "3 hours ago",
-  },
-  {
-    title: "CBI Launches Investigation into Multi-State Cyber Fraud Ring",
-    category: NewsCategory.CRIME,
-    source: "Indian Express",
-    time: "4 hours ago",
-  },
-  {
-    title: "Global Supply Chain Disruptions Expected Following New Trade Tariffs",
-    category: NewsCategory.WORLD,
-    source: "Bloomberg",
-    time: "6 hours ago",
-  },
-  {
-    title: "Breakthrough in Fusion Energy Could Redefine Climate Goals",
-    category: NewsCategory.SCIENCE,
-    source: "BBC",
-    time: "8 hours ago",
-  },
-  {
-    title: "Cyber Warfare Command Intercepts Coordinated Attack on Grid",
-    category: NewsCategory.SECURITY,
-    source: "Wired",
-    time: "10 hours ago",
-  },
-  {
-    title: "New AI Regulations Proposed to Protect Enterprise Data",
-    category: NewsCategory.TECHNOLOGY,
-    source: "TechCrunch",
-    time: "12 hours ago",
+// Utility to render beautiful relative timestamps
+function getRelativeTime(dateStr: string): string {
+  try {
+    const parsed = new Date(dateStr);
+    if (isNaN(parsed.getTime())) return 'Recently';
+    const now = new Date();
+    const diffMs = now.getTime() - parsed.getTime();
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    
+    const diffDays = Math.floor(diffHours / 24);
+    return `${diffDays}d ago`;
+  } catch {
+    return 'Recently';
   }
-];
+}
 
 export default function YourFeed() {
+  const [articles, setArticles] = useState<DBArticle[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  
+  // State for tracking the opened article modal
+  const [selectedArticle, setSelectedArticle] = useState<DBArticle | null>(null);
+
   const sections = [
     { title: 'Policy & Governance', category: NewsCategory.POLITICS, slug: 'politics' },
     { title: 'Economy & Markets', category: NewsCategory.BUSINESS, slug: 'economy' },
@@ -100,88 +70,226 @@ export default function YourFeed() {
     { title: 'National Security & Defense', category: NewsCategory.SECURITY, slug: 'security' },
   ];
 
+  useEffect(() => {
+    async function fetchLiveFeed() {
+      try {
+        const response = await fetch('http://localhost:5001/api/articles');
+        if (!response.ok) {
+          throw new Error('Server responded with an error');
+        }
+        const json = await response.json();
+        if (json.success) {
+          setArticles(json.data);
+        } else {
+          throw new Error(json.message || 'Failed to resolve articles');
+        }
+      } catch (err: any) {
+        setError(err.message || 'Failed to load live news feed.');
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchLiveFeed();
+  }, []);
+
+  // Filter top story: Make the absolute latest article (first in list, since sorted by date) the main highlight!
+  const topStory = articles[0];
+  
+  // Key Developments: Make the next 3 latest articles the sidebar items!
+  const topDevelopments = articles.slice(1, 4);
+
+  if (loading) {
+    return (
+      <div className={styles.container}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh' }}>
+          <div style={{
+            border: '3px solid rgba(255, 255, 255, 0.1)',
+            borderTop: '3px solid #3b82f6',
+            borderRadius: '50%',
+            width: '40px',
+            height: '40px',
+            animation: 'spin 1s linear infinite'
+          }}></div>
+          <style>{`
+            @keyframes spin {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+          `}</style>
+          <p style={{ marginTop: '1.5rem', color: '#94a3b8', fontSize: '0.95rem' }}>Syncing live news pipeline...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className={styles.container}>
+        <div style={{ padding: '2rem', background: 'rgba(239, 68, 68, 0.05)', border: '1px solid rgba(239, 68, 68, 0.15)', borderRadius: '12px', marginTop: '2rem', textAlign: 'center' }}>
+          <h3 style={{ color: '#f87171', marginBottom: '0.5rem' }}>Connection Offline</h3>
+          <p style={{ color: '#94a3b8' }}>{error}</p>
+          <button 
+            onClick={() => { setLoading(true); setError(null); window.location.reload(); }}
+            style={{ marginTop: '1rem', padding: '0.5rem 1.5rem', background: '#3b82f6', border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer' }}
+          >
+            Retry Connection
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.container}>
       <header className={styles.header}>
         <h1 className={styles.title}>Your Feed</h1>
-        <p className={styles.subtitle}>What important developments you need to know today.</p>
+        <p className={styles.subtitle}>Real-time policy, governance, and macroeconomic intelligence.</p>
       </header>
 
-      {/* Top Developments Section */}
-      <section className={styles.section}>
-        <div className={styles.sectionHeader}>
-          <h2 className={styles.sectionTitle}>Top Developments</h2>
-          <Link href="/explore" className={styles.viewAll}>View All</Link>
-        </div>
-        
-        <div className={styles.topDevelopmentsGrid}>
-          {/* Main Headline */}
-          <article className={styles.mainCard}>
-            <div className={styles.cardImagePlaceholder}>
-              <span className={styles.categoryTag}>{topStory.category}</span>
-            </div>
-            <div className={styles.cardContent}>
-              <div className={styles.cardMeta}>
-                <span>{topStory.time}</span>
-              </div>
-              <h3 className={styles.cardTitle}>{topStory.title}</h3>
-              <p className={styles.cardExcerpt}>{topStory.excerpt}</p>
-              <div className={styles.source}>{topStory.source}</div>
-            </div>
-          </article>
-
-          {/* Side List */}
-          <div className={styles.sideList}>
-            {topDevelopments.map((article, index) => (
-              <article key={index} className={styles.listCard}>
-                <div className={styles.listCardContent}>
-                  <span className={styles.listCardCategory}>{article.category}</span>
-                  <h4 className={styles.listCardTitle}>{article.title}</h4>
-                  <div className={styles.listCardMeta}>
-                    {article.source} • {article.time}
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Individual Mapped Sections for each core category */}
-      {sections.map((section) => (
-        <section key={section.slug} className={styles.section}>
+      {/* Top Story & Key Developments Grid */}
+      {topStory && (
+        <section className={styles.section}>
           <div className={styles.sectionHeader}>
-            <h2 className={styles.sectionTitle}>{section.title}</h2>
-            <Link href={`/explore?category=${section.slug}`} className={styles.viewAll}>View All</Link>
+            <h2 className={styles.sectionTitle}>Top Developments</h2>
+            <Link href="/explore" className={styles.viewAll}>View All</Link>
           </div>
-          <div className={styles.standardGrid}>
-            {standardArticles.filter(a => a.category === section.category).map((article, idx) => (
-              <article key={idx} className={styles.mainCard}>
-                 <div className={styles.cardContent}>
-                  <span className={styles.listCardCategory} style={{marginBottom: '1rem'}}>{article.category}</span>
-                  <h3 className={styles.cardTitle} style={{fontSize: '1.25rem'}}>{article.title}</h3>
-                  <div style={{marginTop: 'auto'}}>
-                    <div className={styles.source}>{article.source}</div>
-                    <div className={styles.cardMeta} style={{marginTop: '0.5rem', marginBottom: 0}}>{article.time}</div>
-                  </div>
-                 </div>
-              </article>
-            ))}
-            {/* Placeholder extra article for visual balance */}
-            <article className={styles.mainCard}>
-               <div className={styles.cardContent}>
-                <span className={styles.listCardCategory} style={{marginBottom: '1rem'}}>{section.category}</span>
-                <h3 className={styles.cardTitle} style={{fontSize: '1.25rem'}}>In-Depth: The Future of {section.title} in 2026</h3>
-                <div style={{marginTop: 'auto'}}>
-                  <div className={styles.source}>Reuters</div>
-                  <div className={styles.cardMeta} style={{marginTop: '0.5rem', marginBottom: 0}}>1 day ago</div>
+          
+          <div className={styles.topDevelopmentsGrid}>
+            {/* Main Headline */}
+            <article className={styles.mainCard} onClick={() => setSelectedArticle(topStory)} style={{ cursor: 'pointer' }}>
+              <div className={styles.cardImagePlaceholder}>
+                <span className={styles.categoryTag}>{topStory.category?.name || 'Top Story'}</span>
+              </div>
+              <div className={styles.cardContent}>
+                <div className={styles.cardMeta}>
+                  <span>{getRelativeTime(topStory.publishedAt)}</span>
                 </div>
-               </div>
+                <h3 className={styles.cardTitle}>{topStory.title}</h3>
+                <p className={styles.cardExcerpt}>{topStory.summary || 'Tap to view the full report and updates.'}</p>
+                <div className={styles.source}>{topStory.source}</div>
+              </div>
             </article>
+
+            {/* Side list of key developments */}
+            <div className={styles.sideList}>
+              {topDevelopments.map((article) => (
+                <article key={article.id} className={styles.listCard} onClick={() => setSelectedArticle(article)} style={{ cursor: 'pointer' }}>
+                  <div className={styles.listCardContent}>
+                    <span className={styles.listCardCategory}>{article.category?.name}</span>
+                    <h4 className={styles.listCardTitle}>{article.title}</h4>
+                    <div className={styles.listCardMeta}>
+                      {article.source} • {getRelativeTime(article.publishedAt)}
+                    </div>
+                  </div>
+                </article>
+              ))}
+              {topDevelopments.length === 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#64748b' }}>
+                  Awaiting secondary live developments...
+                </div>
+              )}
+            </div>
           </div>
         </section>
-      ))}
+      )}
 
+      {/* Individual Mapped Sections for each core category */}
+      {sections.map((section) => {
+        // Exclude the top story and developments from the categorized standard feed below
+        const excludedIds = new Set([
+          ...(topStory ? [topStory.id] : []),
+          ...topDevelopments.map(d => d.id)
+        ]);
+
+        const filteredArticles = articles.filter(
+          a => a.category?.name === section.category && !excludedIds.has(a.id)
+        );
+        
+        return (
+          <section key={section.slug} className={styles.section}>
+            <div className={styles.sectionHeader}>
+              <h2 className={styles.sectionTitle}>{section.title}</h2>
+              <Link href={`/explore?category=${section.slug}`} className={styles.viewAll}>View All</Link>
+            </div>
+            
+            <div className={styles.standardGrid}>
+              {filteredArticles.slice(0, 2).map((article) => (
+                <article key={article.id} className={styles.mainCard} onClick={() => setSelectedArticle(article)} style={{ cursor: 'pointer' }}>
+                   <div className={styles.cardContent}>
+                    <span className={styles.listCardCategory} style={{marginBottom: '1rem'}}>{article.category?.name}</span>
+                    <h3 className={styles.cardTitle} style={{fontSize: '1.25rem'}}>{article.title}</h3>
+                    <p className={styles.cardExcerpt} style={{fontSize: '0.875rem', marginTop: '0.5rem'}}>{article.summary}</p>
+                    <div style={{marginTop: 'auto'}}>
+                      <div className={styles.source}>{article.source}</div>
+                      <div className={styles.cardMeta} style={{marginTop: '0.5rem', marginBottom: 0}}>{getRelativeTime(article.publishedAt)}</div>
+                    </div>
+                   </div>
+                </article>
+              ))}
+
+              {filteredArticles.length === 0 && (
+                <article className={styles.mainCard}>
+                   <div className={styles.cardContent}>
+                    <span className={styles.listCardCategory} style={{marginBottom: '1rem'}}>{section.category}</span>
+                    <h3 className={styles.cardTitle} style={{fontSize: '1.25rem', color: '#64748b'}}>Syncing fresh updates for this sector...</h3>
+                    <div style={{marginTop: 'auto'}}>
+                      <div className={styles.source}>System Sync</div>
+                      <div className={styles.cardMeta} style={{marginTop: '0.5rem', marginBottom: 0}}>Checking feed</div>
+                    </div>
+                   </div>
+                </article>
+              )}
+            </div>
+          </section>
+        );
+      })}
+
+      {/* Premium Glassmorphism Reader Modal */}
+      {selectedArticle && (
+        <div className={styles.modalOverlay} onClick={() => setSelectedArticle(null)}>
+          <div className={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalInner}>
+              <div className={styles.modalMeta}>
+                <span className={styles.modalCategory}>{selectedArticle.category?.name || 'In Depth'}</span>
+                <span>{getRelativeTime(selectedArticle.publishedAt)}</span>
+              </div>
+              
+              <h2 className={styles.modalTitle}>{selectedArticle.title}</h2>
+              
+              {selectedArticle.summary && (
+                <div className={styles.modalSummary}>
+                  <strong>Brief:</strong> {selectedArticle.summary}
+                </div>
+              )}
+              
+              <div className={styles.modalBody}>
+                {selectedArticle.content || 'Tap visiting source button below to read full documentation and insights.'}
+              </div>
+              
+              <div className={styles.modalFooter}>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontSize: '0.75rem', color: '#71717a' }}>Publisher</span>
+                  <strong style={{ fontSize: '0.95rem', color: '#fff' }}>{selectedArticle.source}</strong>
+                </div>
+                
+                <div style={{ display: 'flex', gap: '1rem' }}>
+                  <button className={styles.closeBtn} onClick={() => setSelectedArticle(null)}>
+                    Close Reader
+                  </button>
+                  <a 
+                    href={selectedArticle.url} 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    className={styles.visitSourceBtn}
+                  >
+                    Visit Source ↗
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

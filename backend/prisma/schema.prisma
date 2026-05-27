@@ -19,19 +19,34 @@ model Category {
   articles Article[]
 }
 
+model NewsSource {
+  id            String    @id @default(uuid())
+  name          String
+  rssUrl        String    @unique
+  categoryName  String
+  isActive      Boolean   @default(true)
+  lastFetchedAt DateTime?
+  createdAt     DateTime  @default(now())
+  articles      Article[]
+}
+
 model Article {
-  id               String   @id @default(uuid())
+  id               String      @id @default(uuid())
   title            String
   summary          String?
   content          String
-  url              String   @unique
+  url              String      @unique
   source           String
-  isTopStory       Boolean  @default(false)
-  isTopDevelopment Boolean  @default(false)
+  externalId       String?     @unique
+  isTopStory       Boolean     @default(false)
+  isTopDevelopment Boolean     @default(false)
 
   categoryId       String
-  category         Category @relation(fields: [categoryId], references: [id])
+  category         Category    @relation(fields: [categoryId], references: [id])
+
+  sourceId         String?
+  newsSource       NewsSource? @relation(fields: [sourceId], references: [id])
 
   publishedAt      DateTime
-  createdAt        DateTime @default(now())
+  createdAt        DateTime    @default(now())
 }

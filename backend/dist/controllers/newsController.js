@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getArticles = void 0;
 const db_1 = __importDefault(require("../config/db"));
+const ingestionJob_1 = require("../jobs/ingestionJob");
 const getArticles = async (req, res) => {
     try {
         const { category, isTopStory, isTopDevelopment } = req.query;
@@ -16,6 +17,12 @@ const getArticles = async (req, res) => {
                     mode: 'insensitive',
                 },
             };
+            // Asynchronously trigger a background targeted priority sync for this category
+            // It executes without blocking the API call, so the user receives a lightning-fast response!
+            console.log(`⚡️ [API]: User requested "${category}". Triggering priority on-demand crawler...`);
+            (0, ingestionJob_1.crawlCategorySourcesOnDemand)(String(category)).catch((err) => {
+                console.error(`❌ [API]: Background priority sync failed:`, err.message);
+            });
         }
         if (isTopStory !== undefined) {
             whereClause.isTopStory = isTopStory === 'true';
