@@ -434,5 +434,128 @@
   color: #fff;
 }
 
+/* Three-Column Immersive Intelligence Modal Layout */
+.threeColumnContainer {
+  display: grid;
+  grid-template-columns: 1.1fr 1.8fr 1.1fr;
+  gap: 2.5rem;
+  height: 100%;
+}
+
+.timelineSidebar {
+  border-right: 1px solid #27272a;
+  padding-right: 2rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.timelineHeading {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #3b82f6;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 1.5rem 0;
+}
+
+.timelineTrack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  padding-left: 1.5rem;
+  border-left: 2px solid #27272a;
+  margin-left: 0.5rem;
+  overflow-y: auto;
+  max-height: 480px;
+}
+
+.timelineNode {
+  position: relative;
+  background: transparent;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: 100%;
+}
+
+.timelineNodeDot {
+  position: absolute;
+  left: calc(-1.5rem - 6px); /* Align directly on top of the left border line */
+  top: 4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #27272a;
+  border: 2px solid #18181b;
+  transition: all 0.2s ease;
+}
+
+.timelineNodeActive .timelineNodeDot {
+  background: #3b82f6;
+  box-shadow: 0 0 8px #3b82f6;
+  transform: scale(1.2);
+}
+
+.timelineNodeTitle {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #a1a1aa;
+  line-height: 1.4;
+  margin: 0 0 0.25rem 0;
+  transition: color 0.2s ease;
+}
+
+.timelineNodeActive .timelineNodeTitle {
+  color: #fff;
+  font-weight: 700;
+}
+
+.timelineNode:hover .timelineNodeTitle {
+  color: #e4e4e7;
+}
+
+.timelineNodeMeta {
+  font-size: 0.75rem;
+  color: #71717a;
+}
+
+@media (max-width: 1024px) {
+  .threeColumnContainer {
+    grid-template-columns: 1fr;
+    gap: 2rem;
+  }
+  
+  .timelineSidebar {
+    border-right: none;
+    border-bottom: 1px solid #27272a;
+    padding-right: 0;
+    padding-bottom: 2rem;
+  }
+  
+  .timelineTrack {
+    flex-direction: row;
+    overflow-x: auto;
+    border-left: none;
+    padding-left: 0;
+    margin-left: 0;
+    max-height: none;
+    gap: 2.5rem;
+  }
+  
+  .timelineNode {
+    min-width: 200px;
+  }
+  
+  .timelineNodeDot {
+    position: static;
+    margin-bottom: 0.5rem;
+    display: inline-block;
+  }
+}
+
+
 
 

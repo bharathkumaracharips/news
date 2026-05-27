@@ -291,3 +291,164 @@ export const getSimilarArticles = async (req: Request, res: Response) => {
     });
   }
 };
+
+interface TimelineStep {
+  id: string;
+  title: string;
+  publishedAt: Date;
+  source: string;
+  url: string;
+  summary: string | null;
+  content: string;
+  category: any;
+  perspectives: any[];
+}
+
+/**
+ * Builds a chronological vertical timeline of the same news event's historical developments.
+ */
+export const getArticleTimeline = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const referenceArticle = await prisma.article.findUnique({
+      where: { id },
+      include: { category: true }
+    });
+
+    if (!referenceArticle) {
+      return res.status(404).json({
+        success: false,
+        message: 'Article not found'
+      });
+    }
+
+    // Dynamically heal the reference article itself in real-time if its content is a short headline-only placeholder (e.g., < 500 chars)
+    if (!referenceArticle.content || referenceArticle.content.length < 500 || referenceArticle.content.startsWith('Tap visiting source')) {
+      const directUrl = decodeGoogleNewsUrl(referenceArticle.url);
+      try {
+        const crawledBody = await crawlArticleContent(directUrl);
+        if (crawledBody && crawledBody.length > 150) {
+          const updatedArticle = await prisma.article.update({
+            where: { id: referenceArticle.id },
+            data: {
+              url: directUrl,
+              content: crawledBody
+            },
+            include: { category: true }
+          });
+          referenceArticle.content = updatedArticle.content;
+          referenceArticle.url = updatedArticle.url;
+        }
+      } catch (err: any) {
+        console.error(`🩺 [Timeline Heal]: Failed to heal article ${referenceArticle.id}:`, err.message);
+      }
+    }
+
+    // Trigger dynamic Google News perspective/history search to populate the DB in real-time
+    await crawlAlternativePublishersForArticle(
+      referenceArticle.title,
+      referenceArticle.categoryId,
+      referenceArticle.category.name
+    );
+
+    const rawWords = referenceArticle.title
+      .toLowerCase()
+      .replace(/[^\w\s]/g, ' ')
+      .split(/\s+/);
+
+    const keywords = rawWords.filter(
+      word => word.length > 3 && !STOPWORDS.has(word)
+    );
+
+    if (keywords.length === 0) {
+      return res.status(200).json({
+        success: true,
+        count: 1,
+        data: [{
+          id: referenceArticle.id,
+          title: referenceArticle.title,
+          publishedAt: referenceArticle.publishedAt,
+          source: referenceArticle.source,
+          url: referenceArticle.url,
+          summary: referenceArticle.summary,
+          content: referenceArticle.content,
+          category: referenceArticle.category,
+          perspectives: []
+        }]
+      });
+    }
+
+    // Fetch all potentially related articles in same category from DB across all dates
+    const relatedArticles = await prisma.article.findMany({
+      where: {
+        categoryId: referenceArticle.categoryId,
+        OR: keywords.map(kw => ({
+          title: { contains: kw, mode: 'insensitive' }
+        }))
+      },
+      include: {
+        category: true
+      },
+      orderBy: {
+        publishedAt: 'asc' // Oldest to newest
+      }
+    });
+
+    // Memory filter using high-precision dynamic entity matching
+    const matchedArticles = relatedArticles.filter(art =>
+      areArticlesSimilar(referenceArticle.title, art.title) || art.id === referenceArticle.id
+    );
+
+    // Group matching articles chronologically into timeline steps
+    const timeline: TimelineStep[] = [];
+
+    for (const article of matchedArticles) {
+      // Find if there is an existing timeline step covering the same stage (same day/similar titles)
+      const existingStep = timeline.find(step =>
+        areArticlesSimilar(step.title, article.title) &&
+        Math.abs(new Date(step.publishedAt).getTime() - new Date(article.publishedAt).getTime()) <= 12 * 60 * 60 * 1000 // 12-hour window
+      );
+
+      if (existingStep) {
+        // Group under this timeline step as an alternate perspective coverage
+        if (!existingStep.perspectives.some(p => p.source === article.source)) {
+          existingStep.perspectives.push({
+            id: article.id,
+            title: article.title,
+            summary: article.summary,
+            content: article.content,
+            source: article.source,
+            url: article.url,
+            publishedAt: article.publishedAt,
+            category: article.category
+          });
+        }
+      } else {
+        // Establish as a distinct historical stage in the chronological timeline
+        timeline.push({
+          id: article.id,
+          title: article.title,
+          publishedAt: article.publishedAt,
+          source: article.source,
+          url: article.url,
+          summary: article.summary,
+          content: article.content,
+          category: article.category,
+          perspectives: []
+        });
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      count: timeline.length,
+      data: timeline
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Server Error'
+    });
+  }
+};

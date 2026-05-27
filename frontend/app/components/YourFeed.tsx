@@ -30,6 +30,21 @@ interface DBArticle {
   };
 }
 
+interface TimelineStep {
+  id: string;
+  title: string;
+  publishedAt: string;
+  source: string;
+  url: string;
+  summary: string | null;
+  content: string;
+  category: {
+    id: string;
+    name: string;
+  };
+  perspectives: DBArticle[];
+}
+
 // Utility to render beautiful relative timestamps
 function getRelativeTime(dateStr: string): string {
   try {
@@ -57,9 +72,11 @@ export default function YourFeed() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
-  // State for tracking the opened article modal and similar perspective stacks
+  // State for tracking the opened article modal, timeline steps, and similar perspective stacks
   const [selectedArticle, setSelectedArticle] = useState<DBArticle | null>(null);
   const [similarArticles, setSimilarArticles] = useState<DBArticle[]>([]);
+  const [timelineSteps, setTimelineSteps] = useState<TimelineStep[]>([]);
+  const [timelineLoading, setTimelineLoading] = useState(false);
 
   const sections = [
     { title: 'Policy & Governance', category: NewsCategory.POLITICS, slug: 'politics' },
@@ -93,31 +110,43 @@ export default function YourFeed() {
     fetchLiveFeed();
   }, []);
 
-  // Fetch similar perspectives concurrently when modal expands
+  // Fetch chronological timeline developments concurrently when modal expands
   useEffect(() => {
     if (!selectedArticle) {
+      setTimelineSteps([]);
       setSimilarArticles([]);
       return;
     }
 
     const articleId = selectedArticle.id;
+    setTimelineLoading(true);
 
-    async function fetchSimilarCoverage() {
+    async function fetchTimelineData() {
       try {
-        const response = await fetch(`http://localhost:5001/api/articles/${articleId}/similar`);
+        const response = await fetch(`http://localhost:5001/api/articles/${articleId}/timeline`);
         if (response.ok) {
           const json = await response.json();
-          if (json.success) {
-            setSimilarArticles(json.data);
+          if (json.success && json.data.length > 0) {
+            setTimelineSteps(json.data);
+            
+            // Set perspectives for the currently selected article node
+            const activeStep = json.data.find((step: any) => step.id === articleId);
+            if (activeStep) {
+              setSimilarArticles(activeStep.perspectives || []);
+            } else {
+              setSimilarArticles([]);
+            }
           }
         }
       } catch (err) {
-        console.error('Failed to sync perspective stack:', err);
+        console.error('Failed to sync news timeline:', err);
+      } finally {
+        setTimelineLoading(false);
       }
     }
 
-    fetchSimilarCoverage();
-  }, [selectedArticle]);
+    fetchTimelineData();
+  }, [selectedArticle?.id]);
 
   // Filter top story: Make the absolute latest article (first in list) the main highlight!
   const topStory = articles[0];
@@ -269,84 +298,59 @@ export default function YourFeed() {
             </div>
           </section>
         );
-      })}
-
-      {/* Premium Splitscreen Reader Modal with Perspective Stacking */}
+      })}      {/* Premium 3-Column Immersive Reader Modal with Chronological Timeline & Perspective Stacking */}
       {selectedArticle && (
         <div className={styles.modalOverlay} onClick={() => setSelectedArticle(null)}>
           <div 
-            className={`${styles.modalContent} ${similarArticles.length > 0 ? styles.modalContentWide : ''}`} 
+            className={`${styles.modalContent} ${styles.modalContentWide}`} 
             onClick={(e) => e.stopPropagation()}
           >
             <div className={styles.modalInner}>
               
-              {similarArticles.length > 0 ? (
-                <div className={styles.splitscreenContainer}>
-                  
-                  {/* Left Column: Reference Main Reader */}
-                  <div className={styles.articleMain}>
-                    <div className={styles.modalMeta}>
-                      <span className={styles.modalCategory}>{selectedArticle.category?.name || 'In Depth'}</span>
-                      <span>{getRelativeTime(selectedArticle.publishedAt)}</span>
-                    </div>
+              <div className={styles.threeColumnContainer}>
+                
+                {/* Column 1: Chronological vertical timeline sidebar (Left) */}
+                <div className={styles.timelineSidebar}>
+                  <h4 className={styles.timelineHeading}>News Timeline</h4>
+                  <div className={styles.timelineTrack}>
+                    {timelineSteps.map((step, idx) => (
+                      <button
+                        key={step.id}
+                        className={`${styles.timelineNode} ${selectedArticle.id === step.id ? styles.timelineNodeActive : ''}`}
+                        onClick={() => {
+                          setSelectedArticle(step as any);
+                          setSimilarArticles(step.perspectives || []);
+                        }}
+                      >
+                        <div className={styles.timelineNodeDot} />
+                        <h5 className={styles.timelineNodeTitle}>
+                          {step.title.length > 60 ? `${step.title.substring(0, 57)}...` : step.title}
+                        </h5>
+                        <div className={styles.timelineNodeMeta}>
+                          {step.source} • {getRelativeTime(step.publishedAt)}
+                        </div>
+                      </button>
+                    ))}
                     
-                    <h2 className={styles.modalTitle}>{selectedArticle.title}</h2>
-                    
-                    {selectedArticle.summary && (
-                      <div className={styles.modalSummary}>
-                        <strong>Brief:</strong> {selectedArticle.summary}
+                    {timelineSteps.length === 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100px', color: '#71717a' }}>
+                        <div style={{
+                          border: '2px solid rgba(255, 255, 255, 0.1)',
+                          borderTop: '2px solid #3b82f6',
+                          borderRadius: '50%',
+                          width: '20px',
+                          height: '20px',
+                          animation: 'spin 1s linear infinite',
+                          marginBottom: '0.75rem'
+                        }}></div>
+                        <span style={{ fontSize: '0.8rem' }}>Syncing timeline...</span>
                       </div>
                     )}
-                    
-                    <div className={styles.modalBody}>
-                      {selectedArticle.content || 'Tap visiting source button below to read full insights.'}
-                    </div>
-                    
-                    <div className={styles.modalFooter}>
-                      <div style={{ display: 'flex', flexDirection: 'column' }}>
-                        <span style={{ fontSize: '0.75rem', color: '#71717a' }}>Publisher</span>
-                        <strong style={{ fontSize: '0.95rem', color: '#fff' }}>{selectedArticle.source}</strong>
-                      </div>
-                      
-                      <div style={{ display: 'flex', gap: '1rem' }}>
-                        <button className={styles.closeBtn} onClick={() => setSelectedArticle(null)}>
-                          Close
-                        </button>
-                        <a 
-                          href={selectedArticle.url} 
-                          target="_blank" 
-                          rel="noopener noreferrer" 
-                          className={styles.visitSourceBtn}
-                        >
-                          Visit Source ↗
-                        </a>
-                      </div>
-                    </div>
                   </div>
-
-                  {/* Right Column: Dynamic similar perspective stack */}
-                  <div className={styles.perspectiveSidebar}>
-                    <h4 className={styles.sidebarHeading}>Perspective Stack</h4>
-                    <div className={styles.sidebarStack}>
-                      {similarArticles.map((simArt) => (
-                        <button 
-                          key={simArt.id} 
-                          className={styles.sidebarCard}
-                          onClick={() => setSelectedArticle(simArt)}
-                        >
-                          <h5 className={styles.sidebarTitle}>{simArt.title}</h5>
-                          <div className={styles.sidebarMeta}>
-                            {simArt.source} • {getRelativeTime(simArt.publishedAt)}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
                 </div>
-              ) : (
-                /* Classic Single View Modal Layout (when no alternative perspectives exist yet) */
-                <>
+
+                {/* Column 2: Selected active timeline step content (Center) */}
+                <div className={styles.articleMain}>
                   <div className={styles.modalMeta}>
                     <span className={styles.modalCategory}>{selectedArticle.category?.name || 'In Depth'}</span>
                     <span>{getRelativeTime(selectedArticle.publishedAt)}</span>
@@ -370,9 +374,9 @@ export default function YourFeed() {
                       <strong style={{ fontSize: '0.95rem', color: '#fff' }}>{selectedArticle.source}</strong>
                     </div>
                     
-                    <div style={{ display: 'flex', gap: '1rem' }}>
+                    <div style={{ display: 'flex', gap: '1.25rem' }}>
                       <button className={styles.closeBtn} onClick={() => setSelectedArticle(null)}>
-                        Close Reader
+                        Close
                       </button>
                       <a 
                         href={selectedArticle.url} 
@@ -384,8 +388,44 @@ export default function YourFeed() {
                       </a>
                     </div>
                   </div>
-                </>
-              )}
+                </div>
+
+                {/* Column 3: Alternative perspective stack for the active step (Right) */}
+                <div className={styles.perspectiveSidebar}>
+                  <h4 className={styles.sidebarHeading}>Perspective Stack</h4>
+                  <div className={styles.sidebarStack}>
+                    {similarArticles.map((simArt) => (
+                      <button 
+                        key={simArt.id} 
+                        className={styles.sidebarCard}
+                        onClick={() => {
+                          setSelectedArticle(simArt);
+                        }}
+                      >
+                        <h5 className={styles.sidebarTitle}>{simArt.title}</h5>
+                        <div className={styles.sidebarMeta}>
+                          {simArt.source} • {getRelativeTime(simArt.publishedAt)}
+                        </div>
+                      </button>
+                    ))}
+                    
+                    {similarArticles.length === 0 && (
+                      <div style={{ 
+                        color: '#71717a', 
+                        fontSize: '0.85rem', 
+                        padding: '1rem', 
+                        background: '#09090b', 
+                        borderRadius: '8px', 
+                        border: '1px solid #27272a', 
+                        textAlign: 'center' 
+                      }}>
+                        No alternate coverage found for this stage.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+              </div>
 
             </div>
           </div>
