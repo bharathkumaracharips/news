@@ -72,13 +72,15 @@ function ExploreFeedContent() {
   const [articles, setArticles] = useState<DBArticle[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // State for tracking selected article and similar perspective stacks
   const [selectedArticle, setSelectedArticle] = useState<DBArticle | null>(null);
+  const [similarArticles, setSimilarArticles] = useState<DBArticle[]>([]);
 
   useEffect(() => {
     async function fetchCategoryArticles() {
       setLoading(true);
       try {
-        // Query PostgreSQL backend using standard category query selectors
         const url = categoryName 
           ? `http://localhost:5001/api/articles?category=${encodeURIComponent(categoryName)}`
           : 'http://localhost:5001/api/articles';
@@ -102,6 +104,32 @@ function ExploreFeedContent() {
 
     fetchCategoryArticles();
   }, [categorySlug, categoryName]);
+
+  // Fetch similar perspectives concurrently when modal expands
+  useEffect(() => {
+    if (!selectedArticle) {
+      setSimilarArticles([]);
+      return;
+    }
+
+    const articleId = selectedArticle.id;
+
+    async function fetchSimilarCoverage() {
+      try {
+        const response = await fetch(`http://localhost:5001/api/articles/${articleId}/similar`);
+        if (response.ok) {
+          const json = await response.json();
+          if (json.success) {
+            setSimilarArticles(json.data);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to sync perspective stack:', err);
+      }
+    }
+
+    fetchSimilarCoverage();
+  }, [selectedArticle]);
 
   if (loading) {
     return (
@@ -181,48 +209,122 @@ function ExploreFeedContent() {
         </div>
       )}
 
-      {/* Premium Glassmorphism Reader Modal */}
+      {/* Premium Splitscreen Reader Modal with Perspective Stacking */}
       {selectedArticle && (
         <div className={styles.modalOverlay} onClick={() => setSelectedArticle(null)}>
-          <div className={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+          <div 
+            className={`${styles.modalContent} ${similarArticles.length > 0 ? styles.modalContentWide : ''}`} 
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className={styles.modalInner}>
-              <div className={styles.modalMeta}>
-                <span className={styles.modalCategory}>{selectedArticle.category?.name || 'In Depth'}</span>
-                <span>{getRelativeTime(selectedArticle.publishedAt)}</span>
-              </div>
               
-              <h2 className={styles.modalTitle}>{selectedArticle.title}</h2>
-              
-              {selectedArticle.summary && (
-                <div className={styles.modalSummary}>
-                  <strong>Brief:</strong> {selectedArticle.summary}
+              {similarArticles.length > 0 ? (
+                <div className={styles.splitscreenContainer}>
+                  
+                  {/* Left Column: Reference Main Reader */}
+                  <div className={styles.articleMain}>
+                    <div className={styles.modalMeta}>
+                      <span className={styles.modalCategory}>{selectedArticle.category?.name || 'In Depth'}</span>
+                      <span>{getRelativeTime(selectedArticle.publishedAt)}</span>
+                    </div>
+                    
+                    <h2 className={styles.modalTitle}>{selectedArticle.title}</h2>
+                    
+                    {selectedArticle.summary && (
+                      <div className={styles.modalSummary}>
+                        <strong>Brief:</strong> {selectedArticle.summary}
+                      </div>
+                    )}
+                    
+                    <div className={styles.modalBody}>
+                      {selectedArticle.content || 'Tap visiting source button below to read full insights.'}
+                    </div>
+                    
+                    <div className={styles.modalFooter}>
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <span style={{ fontSize: '0.75rem', color: '#71717a' }}>Publisher</span>
+                        <strong style={{ fontSize: '0.95rem', color: '#fff' }}>{selectedArticle.source}</strong>
+                      </div>
+                      
+                      <div style={{ display: 'flex', gap: '1rem' }}>
+                        <button className={styles.closeBtn} onClick={() => setSelectedArticle(null)}>
+                          Close
+                        </button>
+                        <a 
+                          href={selectedArticle.url} 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          className={styles.visitSourceBtn}
+                        >
+                          Visit Source ↗
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right Column: Dynamic similar perspective stack */}
+                  <div className={styles.perspectiveSidebar}>
+                    <h4 className={styles.sidebarHeading}>Perspective Stack</h4>
+                    <div className={styles.sidebarStack}>
+                      {similarArticles.map((simArt) => (
+                        <button 
+                          key={simArt.id} 
+                          className={styles.sidebarCard}
+                          onClick={() => setSelectedArticle(simArt)}
+                        >
+                          <h5 className={styles.sidebarTitle}>{simArt.title}</h5>
+                          <div className={styles.sidebarMeta}>
+                            {simArt.source} • {getRelativeTime(simArt.publishedAt)}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                 </div>
+              ) : (
+                /* Classic Single View Modal Layout (when no alternative perspectives exist yet) */
+                <>
+                  <div className={styles.modalMeta}>
+                    <span className={styles.modalCategory}>{selectedArticle.category?.name || 'In Depth'}</span>
+                    <span>{getRelativeTime(selectedArticle.publishedAt)}</span>
+                  </div>
+                  
+                  <h2 className={styles.modalTitle}>{selectedArticle.title}</h2>
+                  
+                  {selectedArticle.summary && (
+                    <div className={styles.modalSummary}>
+                      <strong>Brief:</strong> {selectedArticle.summary}
+                    </div>
+                  )}
+                  
+                  <div className={styles.modalBody}>
+                    {selectedArticle.content || 'Tap visiting source button below to read full insights.'}
+                  </div>
+                  
+                  <div className={styles.modalFooter}>
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span style={{ fontSize: '0.75rem', color: '#71717a' }}>Publisher</span>
+                      <strong style={{ fontSize: '0.95rem', color: '#fff' }}>{selectedArticle.source}</strong>
+                    </div>
+                    
+                    <div style={{ display: 'flex', gap: '1rem' }}>
+                      <button className={styles.closeBtn} onClick={() => setSelectedArticle(null)}>
+                        Close Reader
+                      </button>
+                      <a 
+                        href={selectedArticle.url} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        className={styles.visitSourceBtn}
+                      >
+                        Visit Source ↗
+                      </a>
+                    </div>
+                  </div>
+                </>
               )}
-              
-              <div className={styles.modalBody}>
-                {selectedArticle.content || 'Tap visiting source button below to read full documentation.'}
-              </div>
-              
-              <div className={styles.modalFooter}>
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span style={{ fontSize: '0.75rem', color: '#71717a' }}>Publisher</span>
-                  <strong style={{ fontSize: '0.95rem', color: '#fff' }}>{selectedArticle.source}</strong>
-                </div>
-                
-                <div style={{ display: 'flex', gap: '1rem' }}>
-                  <button className={styles.closeBtn} onClick={() => setSelectedArticle(null)}>
-                    Close Reader
-                  </button>
-                  <a 
-                    href={selectedArticle.url} 
-                    target="_blank" 
-                    rel="noopener noreferrer" 
-                    className={styles.visitSourceBtn}
-                  >
-                    Visit Source ↗
-                  </a>
-                </div>
-              </div>
+
             </div>
           </div>
         </div>

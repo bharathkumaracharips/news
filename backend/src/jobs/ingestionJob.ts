@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import prisma from '../config/db';
 import { fetchAndNormalizeFeed } from '../services/rssFetcher';
 import { crawlArticleContent } from '../services/htmlCrawler';
+import { areArticlesSimilar, STOPWORDS } from '../controllers/newsController';
 
 let isRunning = false;
 
@@ -64,7 +65,7 @@ export async function ingestSingleSource(source: NewsSourceType): Promise<number
       try {
         const crawledBody = await crawlArticleContent(art.url);
         const finalContent = crawledBody || art.content || 'Tap visiting source button below to read full documentation.';
-        
+
         return {
           title: art.title,
           summary: art.summary,
@@ -134,7 +135,7 @@ export async function runIngestionNow() {
     });
 
     const results = await Promise.all(sourcePromises);
-    
+
     const totalCreated = results.reduce((acc, curr) => acc + curr.count, 0);
     const durationSec = ((Date.now() - startTime) / 1000).toFixed(1);
 
@@ -151,10 +152,10 @@ export async function runIngestionNow() {
  */
 export async function crawlCategorySourcesOnDemand(categoryName: string) {
   console.log(`⚡️ [ingestionJob]: Priority category crawl requested for: ${categoryName}`);
-  
+
   try {
     const targetedSources = await prisma.newsSource.findMany({
-      where: { 
+      where: {
         isActive: true,
         categoryName: { equals: categoryName, mode: 'insensitive' }
       },
@@ -186,9 +187,118 @@ export async function crawlCategorySourcesOnDemand(categoryName: string) {
  */
 export function initIngestionScheduler() {
   console.log('⏰ [ingestionJob]: Initializing RSS ingestion scheduler (Schedule: */15 * * * *)...');
-  
+
   cron.schedule('*/15 * * * *', async () => {
     console.log('⏰ [ingestionJob]: Scheduled cron triggered!');
     await runIngestionNow();
   });
 }
+
+function getSearchQueryFromTitle(title: string): string {
+  // Extract all capitalized words (excluding common start/stop words)
+  const words = title.split(/\s+/).map(w => w.replace(/[^\w]/g, ''));
+  const entities: string[] = [];
+
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    if (w.length > 2 && /^[A-Z]/.test(w)) {
+      const lower = w.toLowerCase();
+      if (!STOPWORDS.has(lower)) {
+        entities.push(w);
+      }
+    }
+  }
+
+  if (entities.length < 2) {
+    const sigWords = title
+      .toLowerCase()
+      .replace(/[^\w\s]/g, ' ')
+      .split(/\s+/)
+      .filter(w => w.length > 3 && !STOPWORDS.has(w));
+    return sigWords.slice(0, 3).join(' ');
+  }
+
+  return entities.slice(0, 4).join(' ');
+}
+
+/**
+ * Dynamically crawls alternative publishers for the exact same event in the background on-demand.
+ */
+export async function crawlAlternativePublishersForArticle(
+  title: string,
+  categoryId: string,
+  categoryName: string
+): Promise<void> {
+  try {
+    const query = getSearchQueryFromTitle(title);
+    if (!query) return;
+
+    console.log(`📡 [ingestionJob]: Dynamically searching Google News for same event perspective stack: "${query}"`);
+
+    const searchUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-IN&gl=IN&ceid=IN:en`;
+    const discoveredArticles = await fetchAndNormalizeFeed(searchUrl, 'Google News Dynamic Search');
+
+    if (discoveredArticles.length === 0) return;
+
+    // Filter to those that cover the EXACT same event (using areArticlesSimilar check)
+    const matchedArticles = discoveredArticles.filter(art => areArticlesSimilar(title, art.title));
+
+    if (matchedArticles.length === 0) return;
+
+    // Filter to those not already in database
+    const newArticles = [];
+    for (const art of matchedArticles) {
+      const existing = await prisma.article.findFirst({
+        where: {
+          OR: [
+            { url: art.url },
+            { title: { equals: art.title, mode: 'insensitive' } }
+          ]
+        }
+      });
+      if (!existing) {
+        newArticles.push(art);
+      }
+    }
+
+    if (newArticles.length === 0) return;
+
+    // Cap at top 4 new perspectives to scrape on-the-fly rapidly
+    const targetArticles = newArticles.slice(0, 4);
+
+    console.log(`🕷️ [ingestionJob]: Crawling ${targetArticles.length} dynamic perspectives for event: "${title}"...`);
+
+    const crawlPromises = targetArticles.map(async (art) => {
+      try {
+        const crawledBody = await crawlArticleContent(art.url);
+        const finalContent = crawledBody || art.content || 'Tap visiting source button below to read full documentation.';
+
+        return {
+          title: art.title,
+          summary: art.summary,
+          content: finalContent,
+          url: art.url,
+          source: art.source,
+          externalId: art.externalId,
+          categoryId,
+          publishedAt: art.publishedAt,
+        };
+      } catch (err: any) {
+        console.error(`⚠️ [ingestionJob]: Error scraping dynamic perspective ${art.url}:`, err.message);
+        return null;
+      }
+    });
+
+    const crawledArticles = await Promise.all(crawlPromises);
+
+    for (const data of crawledArticles) {
+      if (data) {
+        await prisma.article.create({ data });
+        console.log(`✅ [ingestionJob]: Successfully ingested dynamic perspective from [${data.source}]: "${data.title}"`);
+      }
+    }
+  } catch (error: any) {
+    console.error(`❌ [ingestionJob]: Dynamic perspective search failed:`, error.message);
+  }
+}
+

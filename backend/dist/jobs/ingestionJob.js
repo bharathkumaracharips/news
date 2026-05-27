@@ -7,10 +7,12 @@ exports.ingestSingleSource = ingestSingleSource;
 exports.runIngestionNow = runIngestionNow;
 exports.crawlCategorySourcesOnDemand = crawlCategorySourcesOnDemand;
 exports.initIngestionScheduler = initIngestionScheduler;
+exports.crawlAlternativePublishersForArticle = crawlAlternativePublishersForArticle;
 const node_cron_1 = __importDefault(require("node-cron"));
 const db_1 = __importDefault(require("../config/db"));
 const rssFetcher_1 = require("../services/rssFetcher");
 const htmlCrawler_1 = require("../services/htmlCrawler");
+const newsController_1 = require("../controllers/newsController");
 let isRunning = false;
 /**
  * Ingests and processes a single NewsSource with parallelized article crawling. Capped at 5 crawls.
@@ -165,4 +167,96 @@ function initIngestionScheduler() {
         console.log('⏰ [ingestionJob]: Scheduled cron triggered!');
         await runIngestionNow();
     });
+}
+function getSearchQueryFromTitle(title) {
+    // Extract all capitalized words (excluding common start/stop words)
+    const words = title.split(/\s+/).map(w => w.replace(/[^\w]/g, ''));
+    const entities = [];
+    for (let i = 0; i < words.length; i++) {
+        const w = words[i];
+        if (w.length > 2 && /^[A-Z]/.test(w)) {
+            const lower = w.toLowerCase();
+            if (!newsController_1.STOPWORDS.has(lower)) {
+                entities.push(w);
+            }
+        }
+    }
+    if (entities.length < 2) {
+        const sigWords = title
+            .toLowerCase()
+            .replace(/[^\w\s]/g, ' ')
+            .split(/\s+/)
+            .filter(w => w.length > 3 && !newsController_1.STOPWORDS.has(w));
+        return sigWords.slice(0, 3).join(' ');
+    }
+    return entities.slice(0, 4).join(' ');
+}
+/**
+ * Dynamically crawls alternative publishers for the exact same event in the background on-demand.
+ */
+async function crawlAlternativePublishersForArticle(title, categoryId, categoryName) {
+    try {
+        const query = getSearchQueryFromTitle(title);
+        if (!query)
+            return;
+        console.log(`📡 [ingestionJob]: Dynamically searching Google News for same event perspective stack: "${query}"`);
+        const searchUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-IN&gl=IN&ceid=IN:en`;
+        const discoveredArticles = await (0, rssFetcher_1.fetchAndNormalizeFeed)(searchUrl, 'Google News Dynamic Search');
+        if (discoveredArticles.length === 0)
+            return;
+        // Filter to those that cover the EXACT same event (using areArticlesSimilar check)
+        const matchedArticles = discoveredArticles.filter(art => (0, newsController_1.areArticlesSimilar)(title, art.title));
+        if (matchedArticles.length === 0)
+            return;
+        // Filter to those not already in database
+        const newArticles = [];
+        for (const art of matchedArticles) {
+            const existing = await db_1.default.article.findFirst({
+                where: {
+                    OR: [
+                        { url: art.url },
+                        { title: { equals: art.title, mode: 'insensitive' } }
+                    ]
+                }
+            });
+            if (!existing) {
+                newArticles.push(art);
+            }
+        }
+        if (newArticles.length === 0)
+            return;
+        // Cap at top 4 new perspectives to scrape on-the-fly rapidly
+        const targetArticles = newArticles.slice(0, 4);
+        console.log(`🕷️ [ingestionJob]: Crawling ${targetArticles.length} dynamic perspectives for event: "${title}"...`);
+        const crawlPromises = targetArticles.map(async (art) => {
+            try {
+                const crawledBody = await (0, htmlCrawler_1.crawlArticleContent)(art.url);
+                const finalContent = crawledBody || art.content || 'Tap visiting source button below to read full documentation.';
+                return {
+                    title: art.title,
+                    summary: art.summary,
+                    content: finalContent,
+                    url: art.url,
+                    source: art.source,
+                    externalId: art.externalId,
+                    categoryId,
+                    publishedAt: art.publishedAt,
+                };
+            }
+            catch (err) {
+                console.error(`⚠️ [ingestionJob]: Error scraping dynamic perspective ${art.url}:`, err.message);
+                return null;
+            }
+        });
+        const crawledArticles = await Promise.all(crawlPromises);
+        for (const data of crawledArticles) {
+            if (data) {
+                await db_1.default.article.create({ data });
+                console.log(`✅ [ingestionJob]: Successfully ingested dynamic perspective from [${data.source}]: "${data.title}"`);
+            }
+        }
+    }
+    catch (error) {
+        console.error(`❌ [ingestionJob]: Dynamic perspective search failed:`, error.message);
+    }
 }

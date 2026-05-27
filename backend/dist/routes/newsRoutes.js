@@ -5,4 +5,6 @@ const newsController_1 = require("../controllers/newsController");
 const router = (0, express_1.Router)();
 // Endpoint for fetching news articles
 router.get('/articles', newsController_1.getArticles);
+// Endpoint for fetching similar articles from other publishers (Perspective Stacking)
+router.get('/articles/:id/similar', newsController_1.getSimilarArticles);
 exports.default = router;

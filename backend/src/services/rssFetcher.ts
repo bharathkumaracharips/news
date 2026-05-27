@@ -56,6 +56,18 @@ export async function fetchAndNormalizeFeed(
       const title = stripHtml(item.title || 'Untitled Article');
       const url = item.link || '';
       
+      let finalTitle = title;
+      let finalSource = sourceName;
+
+      // Extract real publisher brand and clean title from Google News search results
+      if (sourceName === 'Google News Dynamic Search' || sourceName.includes('Google News')) {
+        const lastDashIndex = title.lastIndexOf(' - ');
+        if (lastDashIndex !== -1) {
+          finalTitle = title.substring(0, lastDashIndex).trim();
+          finalSource = title.substring(lastDashIndex + 3).trim();
+        }
+      }
+
       // Fallback strategies for fetching summary and content
       const summarySnippet = stripHtml(item.contentSnippet || item.summary || item.description || '');
       const summary = summarySnippet.length > 300 
@@ -64,7 +76,7 @@ export async function fetchAndNormalizeFeed(
 
       const rawContent = item.content || item.contentSnippet || item.description || 'No content available.';
       const content = stripHtml(rawContent);
-      const externalId = item.guid || url || `${sourceName}-${title}`;
+      const externalId = item.guid || url || `${finalSource}-${finalTitle}`;
       
       // Ensure time is normalized to UTC
       let publishedAt = new Date();
@@ -76,11 +88,11 @@ export async function fetchAndNormalizeFeed(
       }
 
       return {
-        title,
+        title: finalTitle,
         summary: summary || 'No summary available.',
         content: content || 'Tap visiting source button below to read full documentation and insights.',
         url,
-        source: sourceName,
+        source: finalSource,
         externalId,
         publishedAt
       };
