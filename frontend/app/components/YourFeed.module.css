@@ -1,0 +1,222 @@
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem;
+  font-family: var(--font-geist-sans), sans-serif;
+  color: #e4e4e7;
+}
+
+.header {
+  margin-bottom: 3rem;
+  border-bottom: 2px solid #27272a;
+  padding-bottom: 1rem;
+}
+
+.title {
+  font-size: 2.5rem;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.05em;
+  margin: 0 0 0.5rem 0;
+}
+
+.subtitle {
+  font-size: 1.1rem;
+  color: #a1a1aa;
+  font-weight: 400;
+  margin: 0;
+}
+
+/* Sections */
+.section {
+  margin-bottom: 4rem;
+}
+
+.sectionHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid #3f3f46;
+  padding-bottom: 0.5rem;
+}
+
+.sectionTitle {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #f4f4f5;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0;
+}
+
+.viewAll {
+  color: #60a5fa;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.viewAll:hover {
+  color: #93c5fd;
+}
+
+/* Grids */
+.topDevelopmentsGrid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 2rem;
+}
+
+.standardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 2rem;
+}
+
+/* Cards */
+.mainCard {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #18181b;
+  border: 1px solid #27272a;
+  transition: transform 0.2s ease, border-color 0.2s ease;
+  display: flex;
+  flex-direction: column;
+}
+
+.mainCard:hover {
+  transform: translateY(-4px);
+  border-color: #52525b;
+}
+
+.cardImagePlaceholder {
+  width: 100%;
+  height: 300px;
+  background: linear-gradient(135deg, #27272a, #3f3f46);
+  position: relative;
+}
+
+.categoryTag {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  background: #2563eb;
+  color: #fff;
+  padding: 0.25rem 0.75rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.cardContent {
+  padding: 1.5rem;
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.cardMeta {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.85rem;
+  color: #a1a1aa;
+  margin-bottom: 0.75rem;
+  font-weight: 500;
+}
+
+.cardTitle {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #fff;
+  margin: 0 0 1rem 0;
+  line-height: 1.3;
+}
+
+.cardExcerpt {
+  color: #d4d4d8;
+  font-size: 1rem;
+  line-height: 1.6;
+  margin: 0 0 1.5rem 0;
+  flex-grow: 1;
+}
+
+.source {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #a1a1aa;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.source::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background-color: #60a5fa;
+  border-radius: 50%;
+}
+
+/* Side List for Top Developments */
+.sideList {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.listCard {
+  display: flex;
+  gap: 1rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid #27272a;
+}
+
+.listCard:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.listCardContent {
+  flex: 1;
+}
+
+.listCardCategory {
+  font-size: 0.75rem;
+  color: #60a5fa;
+  font-weight: 700;
+  text-transform: uppercase;
+  margin-bottom: 0.5rem;
+  display: block;
+}
+
+.listCardTitle {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #fff;
+  margin: 0 0 0.5rem 0;
+  line-height: 1.4;
+  transition: color 0.2s ease;
+  cursor: pointer;
+}
+
+.listCardTitle:hover {
+  color: #93c5fd;
+}
+
+.listCardMeta {
+  font-size: 0.8rem;
+  color: #71717a;
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+  .topDevelopmentsGrid {
+    grid-template-columns: 1fr;
+  }
+}

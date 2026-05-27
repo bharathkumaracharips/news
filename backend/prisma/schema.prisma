@@ -1,0 +1,37 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id         String   @id @default(uuid())
+  name       String
+  email      String   @unique
+  createdAt  DateTime @default(now())
+}
+
+model Category {
+  id       String    @id @default(uuid())
+  name     String    @unique
+  articles Article[]
+}
+
+model Article {
+  id               String   @id @default(uuid())
+  title            String
+  summary          String?
+  content          String
+  url              String   @unique
+  source           String
+  isTopStory       Boolean  @default(false)
+  isTopDevelopment Boolean  @default(false)
+
+  categoryId       String
+  category         Category @relation(fields: [categoryId], references: [id])
+
+  publishedAt      DateTime
+  createdAt        DateTime @default(now())
+}
