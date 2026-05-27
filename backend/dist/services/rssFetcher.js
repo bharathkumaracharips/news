@@ -11,6 +11,22 @@ const parser = new rss_parser_1.default({
     }
 });
 /**
+ * Safely strips HTML tags and normalizes entities to return clean text.
+ */
+function stripHtml(htmlStr) {
+    if (!htmlStr)
+        return '';
+    return htmlStr
+        .replace(/<[^>]*>/g, '') // Strip HTML tags
+        .replace(/&nbsp;/g, ' ') // Replace HTML spaces
+        .replace(/&amp;/g, '&') // Replace ampersands
+        .replace(/&lt;/g, '<') // Replace less than
+        .replace(/&gt;/g, '>') // Replace greater than
+        .replace(/&quot;/g, '"') // Replace double quotes
+        .replace(/\s+/g, ' ') // Normalize whitespaces
+        .trim();
+}
+/**
  * Fetches an RSS feed from a given URL and normalizes its articles.
  * @param rssUrl The XML Feed URL
  * @param sourceName The display name of the news source
@@ -25,14 +41,15 @@ async function fetchAndNormalizeFeed(rssUrl, sourceName) {
             return [];
         }
         const normalized = feed.items.map((item) => {
-            const title = item.title || 'Untitled Article';
+            const title = stripHtml(item.title || 'Untitled Article');
             const url = item.link || '';
             // Fallback strategies for fetching summary and content
-            const summarySnippet = item.contentSnippet || item.summary || item.description || '';
+            const summarySnippet = stripHtml(item.contentSnippet || item.summary || item.description || '');
             const summary = summarySnippet.length > 300
                 ? `${summarySnippet.substring(0, 297)}...`
                 : summarySnippet;
-            const content = item.content || item.contentSnippet || item.description || 'No content available.';
+            const rawContent = item.content || item.contentSnippet || item.description || 'No content available.';
+            const content = stripHtml(rawContent);
             const externalId = item.guid || url || `${sourceName}-${title}`;
             // Ensure time is normalized to UTC
             let publishedAt = new Date();
@@ -45,7 +62,7 @@ async function fetchAndNormalizeFeed(rssUrl, sourceName) {
             return {
                 title,
                 summary: summary || 'No summary available.',
-                content,
+                content: content || 'Tap visiting source button below to read full documentation and insights.',
                 url,
                 source: sourceName,
                 externalId,

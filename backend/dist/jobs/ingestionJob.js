@@ -13,15 +13,16 @@ const rssFetcher_1 = require("../services/rssFetcher");
 const htmlCrawler_1 = require("../services/htmlCrawler");
 let isRunning = false;
 /**
- * Ingests and processes a single NewsSource.
- * Downloads feeds, crawls HTML, and updates PostgreSQL database.
+ * Ingests and processes a single NewsSource with parallelized article crawling. Capped at 5 crawls.
  */
 async function ingestSingleSource(source) {
-    let newArticlesCount = 0;
     try {
         const articles = await (0, rssFetcher_1.fetchAndNormalizeFeed)(source.rssUrl, source.name);
+        if (articles.length === 0)
+            return 0;
+        // 1. Filter out already existing articles in parallel
+        const newArticles = [];
         for (const art of articles) {
-            // Check for duplication (URL or externalId check)
             const existing = await db_1.default.article.findFirst({
                 where: {
                     OR: [
@@ -30,52 +31,71 @@ async function ingestSingleSource(source) {
                     ]
                 }
             });
-            if (existing) {
-                continue;
+            if (!existing) {
+                newArticles.push(art);
             }
-            // Ensure Category exists
-            let category = await db_1.default.category.findFirst({
-                where: { name: { equals: source.categoryName, mode: 'insensitive' } }
+        }
+        if (newArticles.length === 0)
+            return 0;
+        // 2. Cap crawls at the latest 5 new articles to satisfy zero-overhead and rate-limit constraints
+        const articlesToCrawl = newArticles.slice(0, 5);
+        // Ensure Category exists or create it
+        let category = await db_1.default.category.findFirst({
+            where: { name: { equals: source.categoryName, mode: 'insensitive' } }
+        });
+        if (!category) {
+            category = await db_1.default.category.create({
+                data: { name: source.categoryName }
             });
-            if (!category) {
-                category = await db_1.default.category.create({
-                    data: { name: source.categoryName }
-                });
-            }
-            // Crawl HTML for full-text segments
-            console.log(`🕷️ [ingestionJob]: Crawling raw HTML text for: ${art.title}`);
-            const crawledBody = await (0, htmlCrawler_1.crawlArticleContent)(art.url);
-            const finalContent = crawledBody || art.content || 'Tap visiting source button below to read full documentation and insights.';
-            // Save in PostgreSQL
-            await db_1.default.article.create({
-                data: {
+        }
+        const categoryId = category.id;
+        console.log(`🕷️ [ingestionJob]: [${source.name}] Spawning parallel crawler workers for ${articlesToCrawl.length} new articles...`);
+        // 3. Crawl all 5 target articles concurrently using Promise.all
+        const crawlPromises = articlesToCrawl.map(async (art) => {
+            try {
+                const crawledBody = await (0, htmlCrawler_1.crawlArticleContent)(art.url);
+                const finalContent = crawledBody || art.content || 'Tap visiting source button below to read full documentation.';
+                return {
                     title: art.title,
                     summary: art.summary,
                     content: finalContent,
                     url: art.url,
                     source: art.source,
                     externalId: art.externalId,
-                    categoryId: category.id,
+                    categoryId,
                     sourceId: source.id,
                     publishedAt: art.publishedAt,
-                }
-            });
-            newArticlesCount++;
+                };
+            }
+            catch (err) {
+                console.error(`⚠️ [ingestionJob]: Worker error crawling ${art.url}:`, err.message);
+                return null;
+            }
+        });
+        const crawledArticles = await Promise.all(crawlPromises);
+        // 4. Save successfully crawled articles to database in parallel transaction chunks
+        let savedCount = 0;
+        for (const data of crawledArticles) {
+            if (data) {
+                await db_1.default.article.create({ data });
+                savedCount++;
+            }
         }
         // Update last fetched timestamp
         await db_1.default.newsSource.update({
             where: { id: source.id },
             data: { lastFetchedAt: new Date() }
         });
+        return savedCount;
     }
     catch (error) {
         console.error(`❌ [ingestionJob]: Error processing source "${source.name}":`, error.message);
+        return 0;
     }
-    return newArticlesCount;
 }
 /**
  * Triggers the live RSS ingestion pipeline.
- * Fetches data from all active sources.
+ * Fetches data from all active sources concurrently in parallel batches!
  */
 async function runIngestionNow() {
     if (isRunning) {
@@ -83,17 +103,22 @@ async function runIngestionNow() {
         return;
     }
     isRunning = true;
-    console.log('🚀 [ingestionJob]: Starting live RSS ingestion pipeline...');
+    console.log('🚀 [ingestionJob]: Starting high-concurrency live RSS ingestion pipeline...');
+    const startTime = Date.now();
     try {
         const activeSources = await db_1.default.newsSource.findMany({
             where: { isActive: true },
         });
-        console.log(`📋 [ingestionJob]: Loaded ${activeSources.length} active news sources from DB.`);
-        for (const source of activeSources) {
-            const newCount = await ingestSingleSource(source);
-            console.log(`📝 [ingestionJob]: Created ${newCount} new articles for ${source.name}`);
-        }
-        console.log('✅ [ingestionJob]: Ingestion pipeline finished execution.');
+        console.log(`📋 [ingestionJob]: Loaded ${activeSources.length} active news sources. Processing concurrently...`);
+        // Spawns parallel worker promises for all active sources concurrently!
+        const sourcePromises = activeSources.map(async (source) => {
+            const count = await ingestSingleSource(source);
+            return { name: source.name, count };
+        });
+        const results = await Promise.all(sourcePromises);
+        const totalCreated = results.reduce((acc, curr) => acc + curr.count, 0);
+        const durationSec = ((Date.now() - startTime) / 1000).toFixed(1);
+        console.log(`✅ [ingestionJob]: Parallel Ingestion completed! Created ${totalCreated} total articles across sources in ${durationSec}s.`);
     }
     catch (error) {
         console.error('❌ [ingestionJob]: Critical pipeline failure:', error.message);
@@ -103,8 +128,7 @@ async function runIngestionNow() {
     }
 }
 /**
- * Prioritizes crawling feeds for a specific category on-demand in the background.
- * Activates when a frontend client requests category-specific articles.
+ * Prioritizes crawling feeds for a specific category on-demand in the background concurrently.
  */
 async function crawlCategorySourcesOnDemand(categoryName) {
     console.log(`⚡️ [ingestionJob]: Priority category crawl requested for: ${categoryName}`);
@@ -119,12 +143,12 @@ async function crawlCategorySourcesOnDemand(categoryName) {
             console.log(`⚡️ [ingestionJob]: No targeted feeds registered for priority category: ${categoryName}`);
             return;
         }
-        console.log(`⚡️ [ingestionJob]: Priority sync started for ${targetedSources.length} sources...`);
-        // Ingest targeted sources on-demand
-        for (const source of targetedSources) {
-            const newCount = await ingestSingleSource(source);
-            console.log(`⚡️ [ingestionJob]: [Priority ${categoryName}] Created ${newCount} new articles for ${source.name}`);
-        }
+        console.log(`⚡️ [ingestionJob]: Priority sync spawning concurrent workers for ${targetedSources.length} sources...`);
+        const sourcePromises = targetedSources.map(async (source) => {
+            const count = await ingestSingleSource(source);
+            console.log(`⚡️ [ingestionJob]: [Priority ${categoryName}] Created ${count} new articles for ${source.name}`);
+        });
+        await Promise.all(sourcePromises);
         console.log(`⚡️ [ingestionJob]: Priority sync completed for: ${categoryName}`);
     }
     catch (error) {

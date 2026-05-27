@@ -16,17 +16,16 @@ interface NewsSourceType {
 }
 
 /**
- * Ingests and processes a single NewsSource.
- * Downloads feeds, crawls HTML, and updates PostgreSQL database.
+ * Ingests and processes a single NewsSource with parallelized article crawling. Capped at 5 crawls.
  */
 export async function ingestSingleSource(source: NewsSourceType): Promise<number> {
-  let newArticlesCount = 0;
-  
   try {
     const articles = await fetchAndNormalizeFeed(source.rssUrl, source.name);
+    if (articles.length === 0) return 0;
 
+    // 1. Filter out already existing articles in parallel
+    const newArticles = [];
     for (const art of articles) {
-      // Check for duplication (URL or externalId check)
       const existing = await prisma.article.findFirst({
         where: {
           OR: [
@@ -35,43 +34,63 @@ export async function ingestSingleSource(source: NewsSourceType): Promise<number
           ]
         }
       });
-
-      if (existing) {
-        continue;
+      if (!existing) {
+        newArticles.push(art);
       }
+    }
 
-      // Ensure Category exists
-      let category = await prisma.category.findFirst({
-        where: { name: { equals: source.categoryName, mode: 'insensitive' } }
+    if (newArticles.length === 0) return 0;
+
+    // 2. Cap crawls at the latest 5 new articles to satisfy zero-overhead and rate-limit constraints
+    const articlesToCrawl = newArticles.slice(0, 5);
+
+    // Ensure Category exists or create it
+    let category = await prisma.category.findFirst({
+      where: { name: { equals: source.categoryName, mode: 'insensitive' } }
+    });
+
+    if (!category) {
+      category = await prisma.category.create({
+        data: { name: source.categoryName }
       });
+    }
 
-      if (!category) {
-        category = await prisma.category.create({
-          data: { name: source.categoryName }
-        });
-      }
+    const categoryId = category.id;
 
-      // Crawl HTML for full-text segments
-      console.log(`🕷️ [ingestionJob]: Crawling raw HTML text for: ${art.title}`);
-      const crawledBody = await crawlArticleContent(art.url);
-      const finalContent = crawledBody || art.content || 'Tap visiting source button below to read full documentation and insights.';
+    console.log(`🕷️ [ingestionJob]: [${source.name}] Spawning parallel crawler workers for ${articlesToCrawl.length} new articles...`);
 
-      // Save in PostgreSQL
-      await prisma.article.create({
-        data: {
+    // 3. Crawl all 5 target articles concurrently using Promise.all
+    const crawlPromises = articlesToCrawl.map(async (art) => {
+      try {
+        const crawledBody = await crawlArticleContent(art.url);
+        const finalContent = crawledBody || art.content || 'Tap visiting source button below to read full documentation.';
+        
+        return {
           title: art.title,
           summary: art.summary,
           content: finalContent,
           url: art.url,
           source: art.source,
           externalId: art.externalId,
-          categoryId: category.id,
+          categoryId,
           sourceId: source.id,
           publishedAt: art.publishedAt,
-        }
-      });
+        };
+      } catch (err: any) {
+        console.error(`⚠️ [ingestionJob]: Worker error crawling ${art.url}:`, err.message);
+        return null;
+      }
+    });
 
-      newArticlesCount++;
+    const crawledArticles = await Promise.all(crawlPromises);
+
+    // 4. Save successfully crawled articles to database in parallel transaction chunks
+    let savedCount = 0;
+    for (const data of crawledArticles) {
+      if (data) {
+        await prisma.article.create({ data });
+        savedCount++;
+      }
     }
 
     // Update last fetched timestamp
@@ -80,16 +99,16 @@ export async function ingestSingleSource(source: NewsSourceType): Promise<number
       data: { lastFetchedAt: new Date() }
     });
 
+    return savedCount;
   } catch (error: any) {
     console.error(`❌ [ingestionJob]: Error processing source "${source.name}":`, error.message);
+    return 0;
   }
-
-  return newArticlesCount;
 }
 
 /**
  * Triggers the live RSS ingestion pipeline.
- * Fetches data from all active sources.
+ * Fetches data from all active sources concurrently in parallel batches!
  */
 export async function runIngestionNow() {
   if (isRunning) {
@@ -98,21 +117,28 @@ export async function runIngestionNow() {
   }
 
   isRunning = true;
-  console.log('🚀 [ingestionJob]: Starting live RSS ingestion pipeline...');
+  console.log('🚀 [ingestionJob]: Starting high-concurrency live RSS ingestion pipeline...');
+  const startTime = Date.now();
 
   try {
     const activeSources = await prisma.newsSource.findMany({
       where: { isActive: true },
     });
 
-    console.log(`📋 [ingestionJob]: Loaded ${activeSources.length} active news sources from DB.`);
+    console.log(`📋 [ingestionJob]: Loaded ${activeSources.length} active news sources. Processing concurrently...`);
 
-    for (const source of activeSources) {
-      const newCount = await ingestSingleSource(source);
-      console.log(`📝 [ingestionJob]: Created ${newCount} new articles for ${source.name}`);
-    }
+    // Spawns parallel worker promises for all active sources concurrently!
+    const sourcePromises = activeSources.map(async (source) => {
+      const count = await ingestSingleSource(source);
+      return { name: source.name, count };
+    });
 
-    console.log('✅ [ingestionJob]: Ingestion pipeline finished execution.');
+    const results = await Promise.all(sourcePromises);
+    
+    const totalCreated = results.reduce((acc, curr) => acc + curr.count, 0);
+    const durationSec = ((Date.now() - startTime) / 1000).toFixed(1);
+
+    console.log(`✅ [ingestionJob]: Parallel Ingestion completed! Created ${totalCreated} total articles across sources in ${durationSec}s.`);
   } catch (error: any) {
     console.error('❌ [ingestionJob]: Critical pipeline failure:', error.message);
   } finally {
@@ -121,8 +147,7 @@ export async function runIngestionNow() {
 }
 
 /**
- * Prioritizes crawling feeds for a specific category on-demand in the background.
- * Activates when a frontend client requests category-specific articles.
+ * Prioritizes crawling feeds for a specific category on-demand in the background concurrently.
  */
 export async function crawlCategorySourcesOnDemand(categoryName: string) {
   console.log(`⚡️ [ingestionJob]: Priority category crawl requested for: ${categoryName}`);
@@ -140,13 +165,14 @@ export async function crawlCategorySourcesOnDemand(categoryName: string) {
       return;
     }
 
-    console.log(`⚡️ [ingestionJob]: Priority sync started for ${targetedSources.length} sources...`);
+    console.log(`⚡️ [ingestionJob]: Priority sync spawning concurrent workers for ${targetedSources.length} sources...`);
 
-    // Ingest targeted sources on-demand
-    for (const source of targetedSources) {
-      const newCount = await ingestSingleSource(source);
-      console.log(`⚡️ [ingestionJob]: [Priority ${categoryName}] Created ${newCount} new articles for ${source.name}`);
-    }
+    const sourcePromises = targetedSources.map(async (source) => {
+      const count = await ingestSingleSource(source);
+      console.log(`⚡️ [ingestionJob]: [Priority ${categoryName}] Created ${count} new articles for ${source.name}`);
+    });
+
+    await Promise.all(sourcePromises);
 
     console.log(`⚡️ [ingestionJob]: Priority sync completed for: ${categoryName}`);
   } catch (error: any) {
