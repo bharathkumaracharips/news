@@ -8,6 +8,7 @@ exports.runIngestionNow = runIngestionNow;
 exports.crawlCategorySourcesOnDemand = crawlCategorySourcesOnDemand;
 exports.initIngestionScheduler = initIngestionScheduler;
 exports.crawlAlternativePublishersForArticle = crawlAlternativePublishersForArticle;
+exports.selfHealDatabaseArticles = selfHealDatabaseArticles;
 const node_cron_1 = __importDefault(require("node-cron"));
 const db_1 = __importDefault(require("../config/db"));
 const rssFetcher_1 = require("../services/rssFetcher");
@@ -258,5 +259,61 @@ async function crawlAlternativePublishersForArticle(title, categoryId, categoryN
     }
     catch (error) {
         console.error(`❌ [ingestionJob]: Dynamic perspective search failed:`, error.message);
+    }
+}
+/**
+ * Automatically heals any articles in the database with missing or placeholder content by decoding their URLs and re-crawling them.
+ */
+async function selfHealDatabaseArticles() {
+    console.log('🩺 [Self-Heal]: Initiating database self-healing check...');
+    try {
+        // Fetch all articles to inspect their content length in memory (extremely low footprint)
+        const allArticles = await db_1.default.article.findMany({
+            include: { category: true }
+        });
+        const targetArticles = allArticles.filter(art => !art.content ||
+            art.content.length < 150 ||
+            art.content.startsWith('Tap visiting source') ||
+            art.content === 'No content available.');
+        if (targetArticles.length === 0) {
+            console.log('🩺 [Self-Heal]: All database articles are fully populated and healthy!');
+            return;
+        }
+        console.log(`🩺 [Self-Heal]: Found ${targetArticles.length} articles with missing/placeholder content. Repairing...`);
+        // Process them in parallel batches of 5 to avoid overloading
+        for (let i = 0; i < targetArticles.length; i += 5) {
+            const batch = targetArticles.slice(i, i + 5);
+            const repairPromises = batch.map(async (art) => {
+                try {
+                    const directUrl = (0, rssFetcher_1.decodeGoogleNewsUrl)(art.url);
+                    const crawledBody = await (0, htmlCrawler_1.crawlArticleContent)(directUrl);
+                    if (crawledBody && crawledBody.length > 150) {
+                        await db_1.default.article.update({
+                            where: { id: art.id },
+                            data: {
+                                url: directUrl,
+                                content: crawledBody
+                            }
+                        });
+                        console.log(`🩺 [Self-Heal]: Successfully repaired content for [${art.source}]: "${art.title}"`);
+                    }
+                    else {
+                        // Update URL even if crawl fails so that it has the correct direct URL
+                        await db_1.default.article.update({
+                            where: { id: art.id },
+                            data: { url: directUrl }
+                        });
+                    }
+                }
+                catch (err) {
+                    console.error(`🩺 [Self-Heal]: Error repairing article ${art.id}:`, err.message);
+                }
+            });
+            await Promise.all(repairPromises);
+        }
+        console.log('🩺 [Self-Heal]: Database self-healing process completed!');
+    }
+    catch (error) {
+        console.error('🩺 [Self-Heal]: Critical failure during self-healing:', error.message);
     }
 }

@@ -1,6 +1,6 @@
 import cron from 'node-cron';
 import prisma from '../config/db';
-import { fetchAndNormalizeFeed } from '../services/rssFetcher';
+import { fetchAndNormalizeFeed, decodeGoogleNewsUrl } from '../services/rssFetcher';
 import { crawlArticleContent } from '../services/htmlCrawler';
 import { areArticlesSimilar, STOPWORDS } from '../controllers/newsController';
 
@@ -301,4 +301,66 @@ export async function crawlAlternativePublishersForArticle(
     console.error(`❌ [ingestionJob]: Dynamic perspective search failed:`, error.message);
   }
 }
+
+/**
+ * Automatically heals any articles in the database with missing or placeholder content by decoding their URLs and re-crawling them.
+ */
+export async function selfHealDatabaseArticles() {
+  console.log('🩺 [Self-Heal]: Initiating database self-healing check...');
+  try {
+    // Fetch all articles to inspect their content length in memory (extremely low footprint)
+    const allArticles = await prisma.article.findMany({
+      include: { category: true }
+    });
+
+    const targetArticles = allArticles.filter(art => 
+      !art.content || 
+      art.content.length < 150 || 
+      art.content.startsWith('Tap visiting source') || 
+      art.content === 'No content available.'
+    );
+
+    if (targetArticles.length === 0) {
+      console.log('🩺 [Self-Heal]: All database articles are fully populated and healthy!');
+      return;
+    }
+
+    console.log(`🩺 [Self-Heal]: Found ${targetArticles.length} articles with missing/placeholder content. Repairing...`);
+
+    // Process them in parallel batches of 5 to avoid overloading
+    for (let i = 0; i < targetArticles.length; i += 5) {
+      const batch = targetArticles.slice(i, i + 5);
+      const repairPromises = batch.map(async (art) => {
+        try {
+          const directUrl = decodeGoogleNewsUrl(art.url);
+          const crawledBody = await crawlArticleContent(directUrl);
+          
+          if (crawledBody && crawledBody.length > 150) {
+            await prisma.article.update({
+              where: { id: art.id },
+              data: {
+                url: directUrl,
+                content: crawledBody
+              }
+            });
+            console.log(`🩺 [Self-Heal]: Successfully repaired content for [${art.source}]: "${art.title}"`);
+          } else {
+            // Update URL even if crawl fails so that it has the correct direct URL
+            await prisma.article.update({
+              where: { id: art.id },
+              data: { url: directUrl }
+            });
+          }
+        } catch (err: any) {
+          console.error(`🩺 [Self-Heal]: Error repairing article ${art.id}:`, err.message);
+        }
+      });
+      await Promise.all(repairPromises);
+    }
+    console.log('🩺 [Self-Heal]: Database self-healing process completed!');
+  } catch (error: any) {
+    console.error('🩺 [Self-Heal]: Critical failure during self-healing:', error.message);
+  }
+}
+
 

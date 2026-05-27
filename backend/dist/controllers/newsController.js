@@ -7,6 +7,8 @@ exports.getSimilarArticles = exports.getArticles = exports.STOPWORDS = void 0;
 exports.areArticlesSimilar = areArticlesSimilar;
 const db_1 = __importDefault(require("../config/db"));
 const ingestionJob_1 = require("../jobs/ingestionJob");
+const htmlCrawler_1 = require("../services/htmlCrawler");
+const rssFetcher_1 = require("../services/rssFetcher");
 exports.STOPWORDS = new Set([
     'this', 'that', 'with', 'from', 'your', 'have', 'more', 'about', 'will', 'than',
     'what', 'when', 'were', 'been', 'would', 'their', 'there', 'some', 'other', 'into',
@@ -154,6 +156,39 @@ const getSimilarArticles = async (req, res) => {
                 success: false,
                 message: 'Article not found'
             });
+        }
+        // Dynamically heal the reference article itself in real-time if its content is a short headline-only placeholder (e.g., < 500 chars)
+        if (!referenceArticle.content || referenceArticle.content.length < 500 || referenceArticle.content.startsWith('Tap visiting source')) {
+            const directUrl = (0, rssFetcher_1.decodeGoogleNewsUrl)(referenceArticle.url);
+            try {
+                const crawledBody = await (0, htmlCrawler_1.crawlArticleContent)(directUrl);
+                if (crawledBody && crawledBody.length > 150) {
+                    const updatedArticle = await db_1.default.article.update({
+                        where: { id: referenceArticle.id },
+                        data: {
+                            url: directUrl,
+                            content: crawledBody
+                        },
+                        include: { category: true }
+                    });
+                    // Update referenceArticle object in memory for downstream similar search matching
+                    referenceArticle.content = updatedArticle.content;
+                    referenceArticle.url = updatedArticle.url;
+                    console.log(`🩺 [Real-Time Heal]: Instantly healed content for [${referenceArticle.source}]: "${referenceArticle.title}"`);
+                }
+                else {
+                    // Update URL even if crawl fails so that it has the correct direct URL
+                    const updatedArticle = await db_1.default.article.update({
+                        where: { id: referenceArticle.id },
+                        data: { url: directUrl },
+                        include: { category: true }
+                    });
+                    referenceArticle.url = updatedArticle.url;
+                }
+            }
+            catch (err) {
+                console.error(`🩺 [Real-Time Heal]: Failed to heal article ${referenceArticle.id}:`, err.message);
+            }
         }
         // Dynamically crawl alternative publishers for the exact same event on-demand in real-time
         await (0, ingestionJob_1.crawlAlternativePublishersForArticle)(referenceArticle.title, referenceArticle.categoryId, referenceArticle.category.name);

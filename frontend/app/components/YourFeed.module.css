@@ -386,6 +386,7 @@
   line-height: 1.7;
   color: #e4e4e7;
   margin-bottom: 2.5rem;
+  white-space: pre-wrap;
 }
 
 .modalFooter {

@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import prisma from '../config/db';
 import { crawlCategorySourcesOnDemand, crawlAlternativePublishersForArticle } from '../jobs/ingestionJob';
+import { crawlArticleContent } from '../services/htmlCrawler';
+import { decodeGoogleNewsUrl } from '../services/rssFetcher';
 
 export const STOPWORDS = new Set([
   'this', 'that', 'with', 'from', 'your', 'have', 'more', 'about', 'will', 'than',
@@ -52,7 +54,7 @@ export function areArticlesSimilar(titleA: string, titleB: string): boolean {
     }
     const smallerSize = Math.min(entitiesA.size, entitiesB.size);
     const entityMatchRatio = matches / smallerSize;
-    
+
     // We require a 70% or higher intersection match of proper noun entities
     return entityMatchRatio >= 0.70;
   }
@@ -193,6 +195,38 @@ export const getSimilarArticles = async (req: Request, res: Response) => {
       });
     }
 
+    // Dynamically heal the reference article itself in real-time if its content is a short headline-only placeholder (e.g., < 500 chars)
+    if (!referenceArticle.content || referenceArticle.content.length < 500 || referenceArticle.content.startsWith('Tap visiting source')) {
+      const directUrl = decodeGoogleNewsUrl(referenceArticle.url);
+      try {
+        const crawledBody = await crawlArticleContent(directUrl);
+        if (crawledBody && crawledBody.length > 150) {
+          const updatedArticle = await prisma.article.update({
+            where: { id: referenceArticle.id },
+            data: {
+              url: directUrl,
+              content: crawledBody
+            },
+            include: { category: true }
+          });
+          // Update referenceArticle object in memory for downstream similar search matching
+          referenceArticle.content = updatedArticle.content;
+          referenceArticle.url = updatedArticle.url;
+          console.log(`🩺 [Real-Time Heal]: Instantly healed content for [${referenceArticle.source}]: "${referenceArticle.title}"`);
+        } else {
+          // Update URL even if crawl fails so that it has the correct direct URL
+          const updatedArticle = await prisma.article.update({
+            where: { id: referenceArticle.id },
+            data: { url: directUrl },
+            include: { category: true }
+          });
+          referenceArticle.url = updatedArticle.url;
+        }
+      } catch (err: any) {
+        console.error(`🩺 [Real-Time Heal]: Failed to heal article ${referenceArticle.id}:`, err.message);
+      }
+    }
+
     // Dynamically crawl alternative publishers for the exact same event on-demand in real-time
     await crawlAlternativePublishersForArticle(
       referenceArticle.title,
@@ -216,6 +250,7 @@ export const getSimilarArticles = async (req: Request, res: Response) => {
         data: []
       });
     }
+
 
     const similarArticles = await prisma.article.findMany({
       where: {

@@ -27,6 +27,10 @@ app.use(errorHandler_1.errorHandler);
 // Start server
 app.listen(PORT, async () => {
     console.log(`⚡️ [server]: Server is running at http://localhost:${PORT}`);
+    // Trigger database self-healing check on startup to fix any missing full-text contents
+    (0, ingestionJob_1.selfHealDatabaseArticles)().catch(err => {
+        console.error('❌ [server]: Startup database self-heal failed:', err.message);
+    });
     // Initialize dynamic background news syncing scheduler
     (0, ingestionJob_1.initIngestionScheduler)();
     // Proactively run an initial live news sync on server startup asynchronously

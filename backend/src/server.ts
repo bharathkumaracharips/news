@@ -3,7 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import newsRoutes from './routes/newsRoutes';
 import { errorHandler } from './middleware/errorHandler';
-import { initIngestionScheduler, runIngestionNow } from './jobs/ingestionJob';
+import { initIngestionScheduler, runIngestionNow, selfHealDatabaseArticles } from './jobs/ingestionJob';
 
 // Load environmental variables
 dotenv.config();
@@ -30,6 +30,11 @@ app.use(errorHandler);
 app.listen(PORT, async () => {
   console.log(`⚡️ [server]: Server is running at http://localhost:${PORT}`);
   
+  // Trigger database self-healing check on startup to fix any missing full-text contents
+  selfHealDatabaseArticles().catch(err => {
+    console.error('❌ [server]: Startup database self-heal failed:', err.message);
+  });
+
   // Initialize dynamic background news syncing scheduler
   initIngestionScheduler();
 
