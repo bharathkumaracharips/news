@@ -55,8 +55,8 @@ export function areArticlesSimilar(titleA: string, titleB: string): boolean {
     const smallerSize = Math.min(entitiesA.size, entitiesB.size);
     const entityMatchRatio = matches / smallerSize;
 
-    // We require a 70% or higher intersection match of proper noun entities
-    return entityMatchRatio >= 0.70;
+    // We require a 45% or higher intersection match of proper noun entities
+    return entityMatchRatio >= 0.45;
   }
 
   // Fallback if one or both titles have no proper noun entities
@@ -87,8 +87,8 @@ export function areArticlesSimilar(titleA: string, titleB: string): boolean {
   const smallerSize = Math.min(wordsA.size, wordsB.size);
   const keywordMatchRatio = matches / smallerSize;
 
-  // We require a 70% or higher match of significant keywords
-  return keywordMatchRatio >= 0.70;
+  // We require a 45% or higher match of significant keywords
+  return keywordMatchRatio >= 0.45;
 }
 
 export const getArticles = async (req: Request, res: Response) => {
@@ -412,17 +412,37 @@ export const getArticleTimeline = async (req: Request, res: Response) => {
 
       if (existingStep) {
         // Group under this timeline step as an alternate perspective coverage
-        if (!existingStep.perspectives.some(p => p.source === article.source)) {
-          existingStep.perspectives.push({
-            id: article.id,
-            title: article.title,
-            summary: article.summary,
-            content: article.content,
-            source: article.source,
-            url: article.url,
-            publishedAt: article.publishedAt,
-            category: article.category
-          });
+        if (!existingStep.perspectives.some(p => p.source === article.source || p.id === article.id)) {
+          // If the matching article is actually the reference article or has newer content,
+          // make sure we don't accidentally hide it if it's the main timeline step node.
+          // Otherwise, push it to perspectives.
+          if (article.id !== referenceArticle.id) {
+            existingStep.perspectives.push({
+              id: article.id,
+              title: article.title,
+              summary: article.summary,
+              content: article.content,
+              source: article.source,
+              url: article.url,
+              publishedAt: article.publishedAt,
+              category: article.category
+            });
+          } else {
+            // Swap so the reference article itself is the main step node
+            const oldMain = { ...existingStep, perspectives: [] };
+            existingStep.id = article.id;
+            existingStep.title = article.title;
+            existingStep.summary = article.summary;
+            existingStep.content = article.content;
+            existingStep.source = article.source;
+            existingStep.url = article.url;
+            existingStep.publishedAt = article.publishedAt;
+            existingStep.category = article.category;
+            
+            if (oldMain.source !== article.source) {
+              existingStep.perspectives.push(oldMain);
+            }
+          }
         }
       } else {
         // Establish as a distinct historical stage in the chronological timeline
