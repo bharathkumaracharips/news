@@ -14,9 +14,10 @@ model User {
 }
 
 model Category {
-  id       String    @id @default(uuid())
-  name     String    @unique
-  articles Article[]
+  id         String      @id @default(uuid())
+  name       String      @unique
+  articles   Article[]
+  newsEvents NewsEvent[]
 }
 
 model NewsSource {
@@ -28,6 +29,22 @@ model NewsSource {
   lastFetchedAt DateTime?
   createdAt     DateTime  @default(now())
   articles      Article[]
+}
+
+/// Represents a canonical news event that clusters multiple articles covering the same story.
+model NewsEvent {
+  id           String    @id @default(uuid())
+  title        String
+  summary      String?
+  articleCount Int       @default(1)
+  firstSeenAt  DateTime
+  lastSeenAt   DateTime
+  categoryId   String
+  category     Category  @relation(fields: [categoryId], references: [id])
+  embedding    Float[]   /// 768-dim centroid vector for the event cluster
+  articles     Article[]
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 }
 
 model Article {
@@ -47,6 +64,11 @@ model Article {
   sourceId         String?
   newsSource       NewsSource? @relation(fields: [sourceId], references: [id])
 
+  embedding        Float[]     /// 768-dim embedding vector from Gemini text-embedding-004
+  eventId          String?
+  newsEvent        NewsEvent?  @relation(fields: [eventId], references: [id])
+
   publishedAt      DateTime
   createdAt        DateTime    @default(now())
 }
+

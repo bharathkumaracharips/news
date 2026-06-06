@@ -3,6 +3,7 @@ import prisma from '../config/db';
 import { fetchAndNormalizeFeed, decodeGoogleNewsUrl } from '../services/rssFetcher';
 import { crawlArticleContent } from '../services/htmlCrawler';
 import { areArticlesSimilar, STOPWORDS } from '../controllers/newsController';
+import { assignArticleToEvent } from '../services/embeddingService';
 
 let isRunning = false;
 
@@ -85,12 +86,17 @@ export async function ingestSingleSource(source: NewsSourceType): Promise<number
 
     const crawledArticles = await Promise.all(crawlPromises);
 
-    // 4. Save successfully crawled articles to database in parallel transaction chunks
+    // 4. Save successfully crawled articles to database and cluster via embeddings
     let savedCount = 0;
     for (const data of crawledArticles) {
       if (data) {
-        await prisma.article.create({ data });
+        const created = await prisma.article.create({ data });
         savedCount++;
+
+        // Generate embedding and assign to a NewsEvent cluster (non-blocking)
+        assignArticleToEvent(created.id).catch(err => {
+          console.error(`⚠️ [ingestionJob]: Clustering failed for "${data.title}":`, err.message);
+        });
       }
     }
 
@@ -293,8 +299,14 @@ export async function crawlAlternativePublishersForArticle(
 
     for (const data of crawledArticles) {
       if (data) {
-        await prisma.article.create({ data });
+        const created = await prisma.article.create({ data });
         console.log(`✅ [ingestionJob]: Successfully ingested dynamic perspective from [${data.source}]: "${data.title}"`);
+
+        try {
+          await assignArticleToEvent(created.id);
+        } catch (err: any) {
+          console.error(`⚠️ [ingestionJob]: Clustering failed for perspective "${data.title}":`, err.message);
+        }
       }
     }
   } catch (error: any) {

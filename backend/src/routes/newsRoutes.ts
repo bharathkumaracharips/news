@@ -1,5 +1,6 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { getArticles, getSimilarArticles, getArticleTimeline } from '../controllers/newsController';
+import { backfillEmbeddings } from '../services/embeddingService';
 
 const router = Router();
 
@@ -11,5 +12,15 @@ router.get('/articles/:id/similar', getSimilarArticles);
 
 // Endpoint for building chronological vertical timeline of developments
 router.get('/articles/:id/timeline', getArticleTimeline);
+
+// Endpoint for backfilling embeddings for existing articles
+router.post('/admin/backfill-embeddings', async (req: Request, res: Response) => {
+  try {
+    const result = await backfillEmbeddings();
+    res.status(200).json({ success: true, ...result });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
 
 export default router;

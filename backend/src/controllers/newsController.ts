@@ -23,6 +23,7 @@ interface GroupedArticle {
   publishedAt: Date;
   categoryId: string;
   category: any;
+  eventId?: string | null;
   perspectives: any[];
 }
 
@@ -56,7 +57,7 @@ export function areArticlesSimilar(titleA: string, titleB: string): boolean {
     const entityMatchRatio = matches / smallerSize;
 
     // We require a 45% or higher intersection match of proper noun entities
-    return entityMatchRatio >= 0.45;
+    if (entityMatchRatio >= 0.45) return true;
   }
 
   // Fallback if one or both titles have no proper noun entities
@@ -136,7 +137,10 @@ export const getArticles = async (req: Request, res: Response) => {
       // Find if this article is similar to an already selected primary news event
       const match = grouped.find(g =>
         g.categoryId === article.categoryId &&
-        areArticlesSimilar(g.title, article.title)
+        (
+          (g.eventId && article.eventId && g.eventId === article.eventId) ||
+          areArticlesSimilar(g.title, article.title)
+        )
       );
 
       if (match) {
@@ -151,13 +155,15 @@ export const getArticles = async (req: Request, res: Response) => {
             source: article.source,
             url: article.url,
             publishedAt: article.publishedAt,
-            category: article.category
+            category: article.category,
+            eventId: article.eventId
           });
         }
       } else {
         // Establish as a new Primary News Card on the feed
         grouped.push({
           ...article,
+          eventId: article.eventId,
           perspectives: []
         });
       }
@@ -243,7 +249,7 @@ export const getSimilarArticles = async (req: Request, res: Response) => {
       word => word.length > 3 && !STOPWORDS.has(word)
     );
 
-    if (keywords.length === 0) {
+    if (keywords.length === 0 && !referenceArticle.eventId) {
       return res.status(200).json({
         success: true,
         count: 0,
@@ -251,28 +257,37 @@ export const getSimilarArticles = async (req: Request, res: Response) => {
       });
     }
 
+    let matchedArticles = [];
 
-    const similarArticles = await prisma.article.findMany({
-      where: {
-        id: { not: id },
-        categoryId: referenceArticle.categoryId,
-        OR: keywords.map(kw => ({
-          title: { contains: kw, mode: 'insensitive' }
-        }))
-      },
-      take: 24, // Pull a larger pool to allow high-precision memory filtering
-      include: {
-        category: true
-      },
-      orderBy: {
-        publishedAt: 'desc'
-      }
-    });
+    if (referenceArticle.eventId) {
+      // Fast path: use embedding-based event cluster
+      matchedArticles = await prisma.article.findMany({
+        where: {
+          eventId: referenceArticle.eventId,
+          id: { not: id }
+        },
+        include: { category: true },
+        orderBy: { publishedAt: 'desc' }
+      });
+    } else {
+      // Fallback path: keyword memory filtering
+      const similarArticles = await prisma.article.findMany({
+        where: {
+          id: { not: id },
+          categoryId: referenceArticle.categoryId,
+          OR: keywords.map(kw => ({
+            title: { contains: kw, mode: 'insensitive' }
+          }))
+        },
+        take: 24,
+        include: { category: true },
+        orderBy: { publishedAt: 'desc' }
+      });
 
-    // Memory filter using high-precision similarity check
-    const matchedArticles = similarArticles.filter(art =>
-      areArticlesSimilar(referenceArticle.title, art.title)
-    );
+      matchedArticles = similarArticles.filter(art =>
+        areArticlesSimilar(referenceArticle.title, art.title)
+      );
+    }
 
     // Remove duplicates from the same publisher
     const uniqueSimilar = matchedArticles.filter(
@@ -361,7 +376,7 @@ export const getArticleTimeline = async (req: Request, res: Response) => {
       word => word.length > 3 && !STOPWORDS.has(word)
     );
 
-    if (keywords.length === 0) {
+    if (keywords.length === 0 && !referenceArticle.eventId) {
       return res.status(200).json({
         success: true,
         count: 1,
@@ -379,26 +394,34 @@ export const getArticleTimeline = async (req: Request, res: Response) => {
       });
     }
 
-    // Fetch all potentially related articles in same category from DB across all dates
-    const relatedArticles = await prisma.article.findMany({
-      where: {
-        categoryId: referenceArticle.categoryId,
-        OR: keywords.map(kw => ({
-          title: { contains: kw, mode: 'insensitive' }
-        }))
-      },
-      include: {
-        category: true
-      },
-      orderBy: {
-        publishedAt: 'asc' // Oldest to newest
-      }
-    });
+    let matchedArticles = [];
 
-    // Memory filter using high-precision dynamic entity matching
-    const matchedArticles = relatedArticles.filter(art =>
-      areArticlesSimilar(referenceArticle.title, art.title) || art.id === referenceArticle.id
-    );
+    if (referenceArticle.eventId) {
+      // Fast path: fetch all articles in the same embedding-based event cluster
+      matchedArticles = await prisma.article.findMany({
+        where: {
+          eventId: referenceArticle.eventId
+        },
+        include: { category: true },
+        orderBy: { publishedAt: 'asc' } // Oldest to newest
+      });
+    } else {
+      // Fallback path: Keyword matching
+      const relatedArticles = await prisma.article.findMany({
+        where: {
+          categoryId: referenceArticle.categoryId,
+          OR: keywords.map(kw => ({
+            title: { contains: kw, mode: 'insensitive' }
+          }))
+        },
+        include: { category: true },
+        orderBy: { publishedAt: 'asc' }
+      });
+
+      matchedArticles = relatedArticles.filter(art =>
+        areArticlesSimilar(referenceArticle.title, art.title) || art.id === referenceArticle.id
+      );
+    }
 
     // Group matching articles chronologically into timeline steps
     const timeline: TimelineStep[] = [];
