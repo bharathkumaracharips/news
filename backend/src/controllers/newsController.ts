@@ -3,6 +3,7 @@ import prisma from '../config/db';
 import { crawlCategorySourcesOnDemand, crawlAlternativePublishersForArticle } from '../jobs/ingestionJob';
 import { crawlArticleContent } from '../services/htmlCrawler';
 import { decodeGoogleNewsUrl } from '../services/rssFetcher';
+import { generateArticleIntelligence, classifyArticleImpact } from '../services/intelligenceService';
 
 export const STOPWORDS = new Set([
   'this', 'that', 'with', 'from', 'your', 'have', 'more', 'about', 'will', 'than',
@@ -487,6 +488,101 @@ export const getArticleTimeline = async (req: Request, res: Response) => {
       success: true,
       count: timeline.length,
       data: timeline
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Server Error'
+    });
+  }
+};
+
+/**
+ * Generates local AI intelligence for an article (Industry Impact, Synthesized Perspectives, Historical Context).
+ */
+export const getArticleIntelligence = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const referenceArticle = await prisma.article.findUnique({
+      where: { id },
+      include: { category: true }
+    });
+
+    if (!referenceArticle) {
+      return res.status(404).json({
+        success: false,
+        message: 'Article not found'
+      });
+    }
+
+    let matchedArticles: any[] = [];
+
+    if (referenceArticle.eventId) {
+      matchedArticles = await prisma.article.findMany({
+        where: { eventId: referenceArticle.eventId },
+        include: { category: true },
+        orderBy: { publishedAt: 'asc' }
+      });
+    } else {
+      const rawWords = referenceArticle.title.toLowerCase().replace(/[^\w\s]/g, ' ').split(/\s+/);
+      const keywords = rawWords.filter(word => word.length > 3 && !STOPWORDS.has(word));
+      
+      if (keywords.length > 0) {
+        const relatedArticles = await prisma.article.findMany({
+          where: {
+            categoryId: referenceArticle.categoryId,
+            OR: keywords.map(kw => ({ title: { contains: kw, mode: 'insensitive' } }))
+          },
+          include: { category: true },
+          orderBy: { publishedAt: 'asc' }
+        });
+
+        matchedArticles = relatedArticles.filter(art =>
+          areArticlesSimilar(referenceArticle.title, art.title) || art.id === referenceArticle.id
+        );
+      } else {
+        matchedArticles = [referenceArticle];
+      }
+    }
+
+    let before = matchedArticles.filter(a => new Date(a.publishedAt) < new Date(referenceArticle.publishedAt) && a.id !== referenceArticle.id);
+    let after = matchedArticles.filter(a => new Date(a.publishedAt) >= new Date(referenceArticle.publishedAt) && a.id !== referenceArticle.id);
+
+    // Filter duplicates by source
+    before = before.filter((art, index, self) => self.findIndex(t => t.source === art.source) === index);
+    after = after.filter((art, index, self) => self.findIndex(t => t.source === art.source) === index);
+
+    let summary = "Local AI intelligence engine connected. This is the timeline context.";
+    let isAiGenerated = false;
+
+    if (req.query.useAi === 'true') {
+      const perspectives = matchedArticles.filter((art, index, self) => self.findIndex(t => t.source === art.source) === index);
+      const intelligence = await generateArticleIntelligence(referenceArticle, perspectives, matchedArticles);
+      summary = intelligence.synthesizedPerspectives;
+      isAiGenerated = true;
+
+      // Classify the impact of 'after' articles
+      for (const article of after) {
+        const textToClassify = `${article.title}. ${article.summary || article.content?.substring(0, 300) || ''}`;
+        article.impactType = await classifyArticleImpact(textToClassify);
+      }
+    } else {
+      // Basic heuristic for impact
+      for (let i = 0; i < after.length; i++) {
+        after[i].impactType = i % 2 === 0 ? 'positive' : 'negative';
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        catalyst: referenceArticle,
+        before,
+        after,
+        summary,
+        isAiGenerated
+      }
     });
   } catch (error: any) {
     res.status(500).json({

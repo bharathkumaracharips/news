@@ -89,11 +89,6 @@ function IntelligenceContent() {
   }, [id]);
 
   const handleTriggerAi = async () => {
-    const insisted = window.confirm(
-      "Triggering AI Analysis will call Gemini 2.5 and consume 1 daily API credit. Do you wish to continue?"
-    );
-    if (!insisted) return;
-
     setAiGenerating(true);
     try {
       const response = await fetch(`http://localhost:5001/api/articles/${id}/intelligence?useAi=true`);

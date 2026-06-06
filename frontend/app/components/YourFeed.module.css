@@ -556,6 +556,93 @@
   }
 }
 
+/* Intelligence Mode Styles */
+.intelligenceBtn {
+  background: rgba(139, 92, 246, 0.1);
+  color: #c4b5fd;
+  border: 1px solid #8b5cf6;
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.intelligenceBtn:hover {
+  background: rgba(139, 92, 246, 0.2);
+}
+
+.intelligenceBtnActive {
+  background: #8b5cf6;
+  color: #fff;
+  box-shadow: 0 0 15px rgba(139, 92, 246, 0.4);
+}
+
+.intelligenceContainer {
+  background: #09090b;
+  border: 1px solid #27272a;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+  animation: fadeIn 0.3s ease;
+}
+
+.intelligenceLoadingState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 0;
+  color: #a1a1aa;
+}
+
+.spinner {
+  border: 3px solid rgba(139, 92, 246, 0.2);
+  border-top: 3px solid #8b5cf6;
+  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  animation: spin 1s linear infinite;
+  margin-bottom: 1rem;
+}
+
+.intelligenceSection {
+  margin-bottom: 1.5rem;
+}
+
+.intelligenceSection:last-child {
+  margin-bottom: 0;
+}
+
+.intelligenceSection h4 {
+  color: #8b5cf6;
+  font-size: 0.95rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 0.75rem 0;
+}
+
+.intelligenceSection p {
+  color: #e4e4e7;
+  font-size: 1rem;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.impactBox {
+  flex: 1;
+  border: 1px solid;
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.impactBox p {
+  margin-top: 0.5rem;
+  font-weight: 500;
+}
 
 
 

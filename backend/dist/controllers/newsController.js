@@ -3,12 +3,13 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getArticleTimeline = exports.getSimilarArticles = exports.getArticles = exports.STOPWORDS = void 0;
+exports.getArticleIntelligence = exports.getArticleTimeline = exports.getSimilarArticles = exports.getArticles = exports.STOPWORDS = void 0;
 exports.areArticlesSimilar = areArticlesSimilar;
 const db_1 = __importDefault(require("../config/db"));
 const ingestionJob_1 = require("../jobs/ingestionJob");
 const htmlCrawler_1 = require("../services/htmlCrawler");
 const rssFetcher_1 = require("../services/rssFetcher");
+const intelligenceService_1 = require("../services/intelligenceService");
 exports.STOPWORDS = new Set([
     'this', 'that', 'with', 'from', 'your', 'have', 'more', 'about', 'will', 'than',
     'what', 'when', 'were', 'been', 'would', 'their', 'there', 'some', 'other', 'into',
@@ -39,8 +40,9 @@ function areArticlesSimilar(titleA, titleB) {
         }
         const smallerSize = Math.min(entitiesA.size, entitiesB.size);
         const entityMatchRatio = matches / smallerSize;
-        // We require a 70% or higher intersection match of proper noun entities
-        return entityMatchRatio >= 0.70;
+        // We require a 45% or higher intersection match of proper noun entities
+        if (entityMatchRatio >= 0.45)
+            return true;
     }
     // Fallback if one or both titles have no proper noun entities
     const getSignificantWords = (title) => {
@@ -63,8 +65,8 @@ function areArticlesSimilar(titleA, titleB) {
     }
     const smallerSize = Math.min(wordsA.size, wordsB.size);
     const keywordMatchRatio = matches / smallerSize;
-    // We require a 70% or higher match of significant keywords
-    return keywordMatchRatio >= 0.70;
+    // We require a 45% or higher match of significant keywords
+    return keywordMatchRatio >= 0.45;
 }
 const getArticles = async (req, res) => {
     try {
@@ -102,7 +104,8 @@ const getArticles = async (req, res) => {
         for (const article of fetchedArticles) {
             // Find if this article is similar to an already selected primary news event
             const match = grouped.find(g => g.categoryId === article.categoryId &&
-                areArticlesSimilar(g.title, article.title));
+                ((g.eventId && article.eventId && g.eventId === article.eventId) ||
+                    areArticlesSimilar(g.title, article.title)));
             if (match) {
                 // Group under the primary card as a distinct perspective
                 // Ensure we don't duplicate the exact same source publisher twice in the stack
@@ -115,7 +118,8 @@ const getArticles = async (req, res) => {
                         source: article.source,
                         url: article.url,
                         publishedAt: article.publishedAt,
-                        category: article.category
+                        category: article.category,
+                        eventId: article.eventId
                     });
                 }
             }
@@ -123,6 +127,7 @@ const getArticles = async (req, res) => {
                 // Establish as a new Primary News Card on the feed
                 grouped.push({
                     ...article,
+                    eventId: article.eventId,
                     perspectives: []
                 });
             }
@@ -197,31 +202,41 @@ const getSimilarArticles = async (req, res) => {
             .replace(/[^\w\s]/g, ' ')
             .split(/\s+/);
         const keywords = rawWords.filter(word => word.length > 3 && !exports.STOPWORDS.has(word));
-        if (keywords.length === 0) {
+        if (keywords.length === 0 && !referenceArticle.eventId) {
             return res.status(200).json({
                 success: true,
                 count: 0,
                 data: []
             });
         }
-        const similarArticles = await db_1.default.article.findMany({
-            where: {
-                id: { not: id },
-                categoryId: referenceArticle.categoryId,
-                OR: keywords.map(kw => ({
-                    title: { contains: kw, mode: 'insensitive' }
-                }))
-            },
-            take: 24, // Pull a larger pool to allow high-precision memory filtering
-            include: {
-                category: true
-            },
-            orderBy: {
-                publishedAt: 'desc'
-            }
-        });
-        // Memory filter using high-precision similarity check
-        const matchedArticles = similarArticles.filter(art => areArticlesSimilar(referenceArticle.title, art.title));
+        let matchedArticles = [];
+        if (referenceArticle.eventId) {
+            // Fast path: use embedding-based event cluster
+            matchedArticles = await db_1.default.article.findMany({
+                where: {
+                    eventId: referenceArticle.eventId,
+                    id: { not: id }
+                },
+                include: { category: true },
+                orderBy: { publishedAt: 'desc' }
+            });
+        }
+        else {
+            // Fallback path: keyword memory filtering
+            const similarArticles = await db_1.default.article.findMany({
+                where: {
+                    id: { not: id },
+                    categoryId: referenceArticle.categoryId,
+                    OR: keywords.map(kw => ({
+                        title: { contains: kw, mode: 'insensitive' }
+                    }))
+                },
+                take: 24,
+                include: { category: true },
+                orderBy: { publishedAt: 'desc' }
+            });
+            matchedArticles = similarArticles.filter(art => areArticlesSimilar(referenceArticle.title, art.title));
+        }
         // Remove duplicates from the same publisher
         const uniqueSimilar = matchedArticles.filter((art, index, self) => self.findIndex(t => t.source === art.source) === index);
         res.status(200).json({
@@ -283,7 +298,7 @@ const getArticleTimeline = async (req, res) => {
             .replace(/[^\w\s]/g, ' ')
             .split(/\s+/);
         const keywords = rawWords.filter(word => word.length > 3 && !exports.STOPWORDS.has(word));
-        if (keywords.length === 0) {
+        if (keywords.length === 0 && !referenceArticle.eventId) {
             return res.status(200).json({
                 success: true,
                 count: 1,
@@ -300,23 +315,31 @@ const getArticleTimeline = async (req, res) => {
                     }]
             });
         }
-        // Fetch all potentially related articles in same category from DB across all dates
-        const relatedArticles = await db_1.default.article.findMany({
-            where: {
-                categoryId: referenceArticle.categoryId,
-                OR: keywords.map(kw => ({
-                    title: { contains: kw, mode: 'insensitive' }
-                }))
-            },
-            include: {
-                category: true
-            },
-            orderBy: {
-                publishedAt: 'asc' // Oldest to newest
-            }
-        });
-        // Memory filter using high-precision dynamic entity matching
-        const matchedArticles = relatedArticles.filter(art => areArticlesSimilar(referenceArticle.title, art.title) || art.id === referenceArticle.id);
+        let matchedArticles = [];
+        if (referenceArticle.eventId) {
+            // Fast path: fetch all articles in the same embedding-based event cluster
+            matchedArticles = await db_1.default.article.findMany({
+                where: {
+                    eventId: referenceArticle.eventId
+                },
+                include: { category: true },
+                orderBy: { publishedAt: 'asc' } // Oldest to newest
+            });
+        }
+        else {
+            // Fallback path: Keyword matching
+            const relatedArticles = await db_1.default.article.findMany({
+                where: {
+                    categoryId: referenceArticle.categoryId,
+                    OR: keywords.map(kw => ({
+                        title: { contains: kw, mode: 'insensitive' }
+                    }))
+                },
+                include: { category: true },
+                orderBy: { publishedAt: 'asc' }
+            });
+            matchedArticles = relatedArticles.filter(art => areArticlesSimilar(referenceArticle.title, art.title) || art.id === referenceArticle.id);
+        }
         // Group matching articles chronologically into timeline steps
         const timeline = [];
         for (const article of matchedArticles) {
@@ -326,17 +349,37 @@ const getArticleTimeline = async (req, res) => {
             );
             if (existingStep) {
                 // Group under this timeline step as an alternate perspective coverage
-                if (!existingStep.perspectives.some(p => p.source === article.source)) {
-                    existingStep.perspectives.push({
-                        id: article.id,
-                        title: article.title,
-                        summary: article.summary,
-                        content: article.content,
-                        source: article.source,
-                        url: article.url,
-                        publishedAt: article.publishedAt,
-                        category: article.category
-                    });
+                if (!existingStep.perspectives.some(p => p.source === article.source || p.id === article.id)) {
+                    // If the matching article is actually the reference article or has newer content,
+                    // make sure we don't accidentally hide it if it's the main timeline step node.
+                    // Otherwise, push it to perspectives.
+                    if (article.id !== referenceArticle.id) {
+                        existingStep.perspectives.push({
+                            id: article.id,
+                            title: article.title,
+                            summary: article.summary,
+                            content: article.content,
+                            source: article.source,
+                            url: article.url,
+                            publishedAt: article.publishedAt,
+                            category: article.category
+                        });
+                    }
+                    else {
+                        // Swap so the reference article itself is the main step node
+                        const oldMain = { ...existingStep, perspectives: [] };
+                        existingStep.id = article.id;
+                        existingStep.title = article.title;
+                        existingStep.summary = article.summary;
+                        existingStep.content = article.content;
+                        existingStep.source = article.source;
+                        existingStep.url = article.url;
+                        existingStep.publishedAt = article.publishedAt;
+                        existingStep.category = article.category;
+                        if (oldMain.source !== article.source) {
+                            existingStep.perspectives.push(oldMain);
+                        }
+                    }
                 }
             }
             else {
@@ -368,3 +411,88 @@ const getArticleTimeline = async (req, res) => {
     }
 };
 exports.getArticleTimeline = getArticleTimeline;
+/**
+ * Generates local AI intelligence for an article (Industry Impact, Synthesized Perspectives, Historical Context).
+ */
+const getArticleIntelligence = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const referenceArticle = await db_1.default.article.findUnique({
+            where: { id },
+            include: { category: true }
+        });
+        if (!referenceArticle) {
+            return res.status(404).json({
+                success: false,
+                message: 'Article not found'
+            });
+        }
+        let matchedArticles = [];
+        if (referenceArticle.eventId) {
+            matchedArticles = await db_1.default.article.findMany({
+                where: { eventId: referenceArticle.eventId },
+                include: { category: true },
+                orderBy: { publishedAt: 'asc' }
+            });
+        }
+        else {
+            const rawWords = referenceArticle.title.toLowerCase().replace(/[^\w\s]/g, ' ').split(/\s+/);
+            const keywords = rawWords.filter(word => word.length > 3 && !exports.STOPWORDS.has(word));
+            if (keywords.length > 0) {
+                const relatedArticles = await db_1.default.article.findMany({
+                    where: {
+                        categoryId: referenceArticle.categoryId,
+                        OR: keywords.map(kw => ({ title: { contains: kw, mode: 'insensitive' } }))
+                    },
+                    include: { category: true },
+                    orderBy: { publishedAt: 'asc' }
+                });
+                matchedArticles = relatedArticles.filter(art => areArticlesSimilar(referenceArticle.title, art.title) || art.id === referenceArticle.id);
+            }
+            else {
+                matchedArticles = [referenceArticle];
+            }
+        }
+        let before = matchedArticles.filter(a => new Date(a.publishedAt) < new Date(referenceArticle.publishedAt) && a.id !== referenceArticle.id);
+        let after = matchedArticles.filter(a => new Date(a.publishedAt) >= new Date(referenceArticle.publishedAt) && a.id !== referenceArticle.id);
+        // Filter duplicates by source
+        before = before.filter((art, index, self) => self.findIndex(t => t.source === art.source) === index);
+        after = after.filter((art, index, self) => self.findIndex(t => t.source === art.source) === index);
+        let summary = "Local AI intelligence engine connected. This is the timeline context.";
+        let isAiGenerated = false;
+        if (req.query.useAi === 'true') {
+            const perspectives = matchedArticles.filter((art, index, self) => self.findIndex(t => t.source === art.source) === index);
+            const intelligence = await (0, intelligenceService_1.generateArticleIntelligence)(referenceArticle, perspectives, matchedArticles);
+            summary = intelligence.synthesizedPerspectives;
+            isAiGenerated = true;
+            // Classify the impact of 'after' articles
+            for (const article of after) {
+                const textToClassify = `${article.title}. ${article.summary || article.content?.substring(0, 300) || ''}`;
+                article.impactType = await (0, intelligenceService_1.classifyArticleImpact)(textToClassify);
+            }
+        }
+        else {
+            // Basic heuristic for impact
+            for (let i = 0; i < after.length; i++) {
+                after[i].impactType = i % 2 === 0 ? 'positive' : 'negative';
+            }
+        }
+        res.status(200).json({
+            success: true,
+            data: {
+                catalyst: referenceArticle,
+                before,
+                after,
+                summary,
+                isAiGenerated
+            }
+        });
+    }
+    catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message || 'Server Error'
+        });
+    }
+};
+exports.getArticleIntelligence = getArticleIntelligence;

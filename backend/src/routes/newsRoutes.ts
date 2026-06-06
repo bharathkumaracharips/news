@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { getArticles, getSimilarArticles, getArticleTimeline } from '../controllers/newsController';
+import { getArticles, getSimilarArticles, getArticleTimeline, getArticleIntelligence } from '../controllers/newsController';
 import { backfillEmbeddings } from '../services/embeddingService';
 
 const router = Router();
@@ -12,6 +12,9 @@ router.get('/articles/:id/similar', getSimilarArticles);
 
 // Endpoint for building chronological vertical timeline of developments
 router.get('/articles/:id/timeline', getArticleTimeline);
+
+// Endpoint for fetching local AI generated intelligence for an article
+router.get('/articles/:id/intelligence', getArticleIntelligence);
 
 // Endpoint for backfilling embeddings for existing articles
 router.post('/admin/backfill-embeddings', async (req: Request, res: Response) => {

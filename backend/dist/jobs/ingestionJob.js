@@ -14,6 +14,7 @@ const db_1 = __importDefault(require("../config/db"));
 const rssFetcher_1 = require("../services/rssFetcher");
 const htmlCrawler_1 = require("../services/htmlCrawler");
 const newsController_1 = require("../controllers/newsController");
+const embeddingService_1 = require("../services/embeddingService");
 let isRunning = false;
 /**
  * Ingests and processes a single NewsSource with parallelized article crawling. Capped at 5 crawls.
@@ -76,12 +77,16 @@ async function ingestSingleSource(source) {
             }
         });
         const crawledArticles = await Promise.all(crawlPromises);
-        // 4. Save successfully crawled articles to database in parallel transaction chunks
+        // 4. Save successfully crawled articles to database and cluster via embeddings
         let savedCount = 0;
         for (const data of crawledArticles) {
             if (data) {
-                await db_1.default.article.create({ data });
+                const created = await db_1.default.article.create({ data });
                 savedCount++;
+                // Generate embedding and assign to a NewsEvent cluster (non-blocking)
+                (0, embeddingService_1.assignArticleToEvent)(created.id).catch(err => {
+                    console.error(`⚠️ [ingestionJob]: Clustering failed for "${data.title}":`, err.message);
+                });
             }
         }
         // Update last fetched timestamp
@@ -252,8 +257,14 @@ async function crawlAlternativePublishersForArticle(title, categoryId, categoryN
         const crawledArticles = await Promise.all(crawlPromises);
         for (const data of crawledArticles) {
             if (data) {
-                await db_1.default.article.create({ data });
+                const created = await db_1.default.article.create({ data });
                 console.log(`✅ [ingestionJob]: Successfully ingested dynamic perspective from [${data.source}]: "${data.title}"`);
+                try {
+                    await (0, embeddingService_1.assignArticleToEvent)(created.id);
+                }
+                catch (err) {
+                    console.error(`⚠️ [ingestionJob]: Clustering failed for perspective "${data.title}":`, err.message);
+                }
             }
         }
     }
