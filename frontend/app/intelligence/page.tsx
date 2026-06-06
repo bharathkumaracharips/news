@@ -259,52 +259,175 @@ function IntelligenceContent() {
           position: 'relative',
           overflow: 'hidden'
         }}>
-          <svg width="100%" height="240" viewBox="0 0 800 240" style={{ maxWidth: '650px' }}>
-            <defs>
-              <linearGradient id="leftGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.2" />
-                <stop offset="100%" stopColor="#7c3aed" stopOpacity="0.8" />
-              </linearGradient>
-              <linearGradient id="rightGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stopColor="#7c3aed" stopOpacity="0.8" />
-                <stop offset="100%" stopColor="#10b981" stopOpacity="0.2" />
-              </linearGradient>
-              <linearGradient id="disruptGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stopColor="#7c3aed" stopOpacity="0.8" />
-                <stop offset="100%" stopColor="#ef4444" stopOpacity="0.2" />
-              </linearGradient>
-            </defs>
+          {(() => {
+            const leftCount = before.length;
+            const posCount = positiveImpacts.length;
+            const negCount = negativeImpacts.length;
+            
+            const maxNodes = Math.max(leftCount, posCount + negCount, 1);
+            // Add some base height and scale with nodes
+            const svgHeight = Math.max(300, maxNodes * 90);
+            const centerY = svgHeight / 2;
+            const svgWidth = 900;
+            const centerX = svgWidth / 2;
 
-            <line x1="150" y1="120" x2="400" y2="120" stroke="url(#leftGrad)" strokeWidth="3" strokeDasharray="6 4">
-              <animate attributeName="stroke-dashoffset" values="50;0" dur="4s" repeatCount="indefinite" />
-            </line>
-            <line x1="400" y1="120" x2="650" y2="60" stroke="url(#rightGrad)" strokeWidth="3" strokeDasharray="6 4">
-              <animate attributeName="stroke-dashoffset" values="0;50" dur="4s" repeatCount="indefinite" />
-            </line>
-            <line x1="400" y1="120" x2="650" y2="180" stroke="url(#disruptGrad)" strokeWidth="3" strokeDasharray="6 4">
-              <animate attributeName="stroke-dashoffset" values="0;50" dur="4s" repeatCount="indefinite" />
-            </line>
+            // Compute positions
+            const beforeNodes = before.map((art, i) => {
+              const spacing = svgHeight / (leftCount + 1);
+              return { x: 150, y: spacing * (i + 1), article: art, type: 'baseline' };
+            });
 
-            <circle cx="150" cy="120" r="28" fill="#1e3a8a" stroke="#3b82f6" strokeWidth="2" />
-            <text x="150" y="123" fill="#fff" fontSize="10" fontWeight="bold" textAnchor="middle">BASELINE</text>
-            <text x="150" y="165" fill="#94a3b8" fontSize="11" textAnchor="middle">Old Manual Overhead</text>
+            const posNodes = positiveImpacts.map((art, i) => {
+              const spacing = centerY / (posCount + 1);
+              return { x: svgWidth - 150, y: spacing * (i + 1), article: art, type: 'positive' };
+            });
 
-            <circle cx="400" cy="120" r="42" fill="#4c1d95" stroke="#a78bfa" strokeWidth="3" />
-            <circle cx="400" cy="120" r="49" fill="none" stroke="#a78bfa" strokeWidth="1" strokeOpacity="0.5">
-              <animate attributeName="r" values="42;60;42" dur="3s" repeatCount="indefinite" />
-              <animate attributeName="stroke-opacity" values="0.6;0;0.6" dur="3s" repeatCount="indefinite" />
-            </circle>
-            <text x="400" y="124" fill="#fff" fontSize="11" fontWeight="bold" textAnchor="middle">CATALYST</text>
-            <text x="400" y="185" fill="#a78bfa" fontSize="12" fontWeight="bold" textAnchor="middle">Decision Point 🧠</text>
+            const negNodes = negativeImpacts.map((art, i) => {
+              const spacing = (svgHeight - centerY) / (negCount + 1);
+              return { x: svgWidth - 150, y: centerY + spacing * (i + 1), article: art, type: 'negative' };
+            });
 
-            <circle cx="650" cy="60" r="28" fill="#065f46" stroke="#10b981" strokeWidth="2" />
-            <text x="650" y="63" fill="#fff" fontSize="10" fontWeight="bold" textAnchor="middle">WINNERS</text>
-            <text x="650" y="105" fill="#10b981" fontSize="11" textAnchor="middle">IT & Tech Spikes 🟢</text>
+            const catalystNode = { x: centerX, y: centerY, article: catalyst, type: 'catalyst' };
 
-            <circle cx="650" cy="180" r="28" fill="#7f1d1d" stroke="#ef4444" strokeWidth="2" />
-            <text x="650" y="183" fill="#fff" fontSize="10" fontWeight="bold" textAnchor="middle">DISRUPT</text>
-            <text x="650" y="225" fill="#f87171" fontSize="11" textAnchor="middle">Legacy Systems 🔴</text>
-          </svg>
+            // Helper for drawing smooth curves
+            const BezierCurve = ({ x1, y1, x2, y2, strokeColor }: any) => {
+              const cp1x = x1 + (x2 - x1) / 2;
+              const cp2x = x1 + (x2 - x1) / 2;
+              return (
+                <path 
+                  d={`M ${x1} ${y1} C ${cp1x} ${y1}, ${cp2x} ${y2}, ${x2} ${y2}`} 
+                  fill="none" 
+                  stroke={strokeColor} 
+                  strokeWidth="2" 
+                  strokeDasharray="6 6"
+                >
+                  <animate attributeName="stroke-dashoffset" values="50;0" dur="3s" repeatCount="indefinite" />
+                </path>
+              );
+            };
+
+            // Helper for rendering article cards
+            const ArticleCard = ({ node }: any) => {
+              const { x, y, article, type } = node;
+              const width = 220;
+              const height = 75;
+              
+              let bgColor = 'rgba(59, 130, 246, 0.05)';
+              let borderColor = '#3b82f6';
+              if (type === 'catalyst') {
+                bgColor = 'rgba(124, 58, 237, 0.15)';
+                borderColor = '#a78bfa';
+              } else if (type === 'positive') {
+                bgColor = 'rgba(16, 185, 129, 0.05)';
+                borderColor = '#10b981';
+              } else if (type === 'negative') {
+                bgColor = 'rgba(239, 68, 68, 0.05)';
+                borderColor = '#ef4444';
+              }
+
+              return (
+                <foreignObject x={x - width / 2} y={y - height / 2} width={width} height={height}>
+                  <div 
+                    onClick={() => window.open(article.url, '_blank')}
+                    style={{
+                      width: '100%', height: '100%', 
+                      background: bgColor, 
+                      border: `1px solid ${borderColor}`,
+                      borderRadius: '8px', 
+                      padding: '0.6rem', 
+                      boxSizing: 'border-box',
+                      display: 'flex', 
+                      flexDirection: 'column', 
+                      justifyContent: 'center', 
+                      cursor: 'pointer',
+                      backdropFilter: 'blur(4px)',
+                      transition: 'transform 0.2s, borderColor 0.2s'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.transform = 'translateY(-2px)';
+                      e.currentTarget.style.borderColor = '#fff';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.transform = 'translateY(0)';
+                      e.currentTarget.style.borderColor = borderColor;
+                    }}
+                  >
+                    <div style={{ fontSize: '0.65rem', color: borderColor, fontWeight: 'bold', marginBottom: '6px', display: 'flex', justifyContent: 'space-between', textTransform: 'uppercase' }}>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '60%' }}>{article.source}</span>
+                      <span style={{ whiteSpace: 'nowrap' }}>{getRelativeTime(article.publishedAt)}</span>
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: '#fff', lineHeight: '1.3', overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                      {article.title}
+                    </div>
+                  </div>
+                </foreignObject>
+              );
+            };
+
+            return (
+              <svg width="100%" height={svgHeight} viewBox={`0 0 ${svgWidth} ${svgHeight}`} style={{ maxWidth: '900px', overflow: 'visible' }}>
+                <defs>
+                  <linearGradient id="leftGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.3" />
+                    <stop offset="100%" stopColor="#7c3aed" stopOpacity="0.8" />
+                  </linearGradient>
+                  <linearGradient id="posGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stopColor="#7c3aed" stopOpacity="0.8" />
+                    <stop offset="100%" stopColor="#10b981" stopOpacity="0.3" />
+                  </linearGradient>
+                  <linearGradient id="negGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stopColor="#7c3aed" stopOpacity="0.8" />
+                    <stop offset="100%" stopColor="#ef4444" stopOpacity="0.3" />
+                  </linearGradient>
+                </defs>
+
+                {/* Draw Before -> Catalyst lines */}
+                {beforeNodes.map(node => (
+                  <BezierCurve 
+                    key={`line-before-${node.article.id}`} 
+                    x1={node.x + 110} y1={node.y} 
+                    x2={catalystNode.x - 110} y2={catalystNode.y} 
+                    strokeColor="url(#leftGrad)" 
+                  />
+                ))}
+
+                {/* Draw Catalyst -> Positive lines */}
+                {posNodes.map(node => (
+                  <BezierCurve 
+                    key={`line-pos-${node.article.id}`} 
+                    x1={catalystNode.x + 110} y1={catalystNode.y} 
+                    x2={node.x - 110} y2={node.y} 
+                    strokeColor="url(#posGrad)" 
+                  />
+                ))}
+
+                {/* Draw Catalyst -> Negative lines */}
+                {negNodes.map(node => (
+                  <BezierCurve 
+                    key={`line-neg-${node.article.id}`} 
+                    x1={catalystNode.x + 110} y1={catalystNode.y} 
+                    x2={node.x - 110} y2={node.y} 
+                    strokeColor="url(#negGrad)" 
+                  />
+                ))}
+
+                {/* Render Nodes */}
+                {beforeNodes.map(node => <ArticleCard key={`node-${node.article.id}`} node={node} />)}
+                <ArticleCard node={catalystNode} />
+                {posNodes.map(node => <ArticleCard key={`node-${node.article.id}`} node={node} />)}
+                {negNodes.map(node => <ArticleCard key={`node-${node.article.id}`} node={node} />)}
+
+                {/* Labels */}
+                {beforeNodes.length > 0 && (
+                  <text x={150} y={15} fill="#3b82f6" fontSize="12" fontWeight="bold" textAnchor="middle" letterSpacing="1">ANTECEDENT HISTORY</text>
+                )}
+                <text x={centerX} y={15} fill="#a78bfa" fontSize="12" fontWeight="bold" textAnchor="middle" letterSpacing="1">TRIGGER DECISION 🧠</text>
+                {(posNodes.length > 0 || negNodes.length > 0) && (
+                  <text x={svgWidth - 150} y={15} fill="#94a3b8" fontSize="12" fontWeight="bold" textAnchor="middle" letterSpacing="1">RIPPLE IMPACT</text>
+                )}
+              </svg>
+            );
+          })()}
         </div>
       </section>
 
