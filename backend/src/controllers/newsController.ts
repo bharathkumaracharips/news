@@ -9,8 +9,9 @@ export const STOPWORDS = new Set([
   'this', 'that', 'with', 'from', 'your', 'have', 'more', 'about', 'will', 'than',
   'what', 'when', 'were', 'been', 'would', 'their', 'there', 'some', 'other', 'into',
   'over', 'also', 'only', 'amid', 'says', 'said', 'news', 'after', 'does', 'just',
-  'where', 'which', 'their', 'these', 'under', 'upholds', 'first', 'second', 'third'
+  'where', 'which', 'these', 'under', 'upholds', 'first', 'second', 'third'
 ]);
+
 
 interface GroupedArticle {
   id: string;
@@ -38,7 +39,7 @@ export function areArticlesSimilar(titleA: string, titleB: string): boolean {
       title
         .split(/\s+/)
         .map(w => w.replace(/[^\w]/g, ''))
-        .filter(w => w.length > 2 && /^[A-Z]/.test(w))
+        .filter((w, i) => w.length > 2 && /^[A-Z]/.test(w) && i > 0)
         .map(w => w.toLowerCase())
     );
   };
@@ -275,7 +276,6 @@ export const getSimilarArticles = async (req: Request, res: Response) => {
       const similarArticles = await prisma.article.findMany({
         where: {
           id: { not: id },
-          categoryId: referenceArticle.categoryId,
           OR: keywords.map(kw => ({
             title: { contains: kw, mode: 'insensitive' }
           }))
@@ -410,7 +410,6 @@ export const getArticleTimeline = async (req: Request, res: Response) => {
       // Fallback path: Keyword matching
       const relatedArticles = await prisma.article.findMany({
         where: {
-          categoryId: referenceArticle.categoryId,
           OR: keywords.map(kw => ({
             title: { contains: kw, mode: 'insensitive' }
           }))
@@ -531,7 +530,6 @@ export const getArticleIntelligence = async (req: Request, res: Response) => {
       if (keywords.length > 0) {
         const relatedArticles = await prisma.article.findMany({
           where: {
-            categoryId: referenceArticle.categoryId,
             OR: keywords.map(kw => ({ title: { contains: kw, mode: 'insensitive' } }))
           },
           include: { category: true },
@@ -555,11 +553,16 @@ export const getArticleIntelligence = async (req: Request, res: Response) => {
 
     let summary = "Local AI intelligence engine connected. This is the timeline context.";
     let isAiGenerated = false;
+    let industryImpact = { 
+      benefited: [] as { sector: string, reason: string }[], 
+      disadvantaged: [] as { sector: string, reason: string }[] 
+    };
 
     if (req.query.useAi === 'true') {
       const perspectives = matchedArticles.filter((art, index, self) => self.findIndex(t => t.source === art.source) === index);
       const intelligence = await generateArticleIntelligence(referenceArticle, perspectives, matchedArticles);
       summary = intelligence.synthesizedPerspectives;
+      industryImpact = intelligence.industryImpact;
       isAiGenerated = true;
 
       // Classify the impact of 'after' articles
@@ -580,6 +583,7 @@ export const getArticleIntelligence = async (req: Request, res: Response) => {
         catalyst: referenceArticle,
         before,
         after,
+        industryImpact,
         summary,
         isAiGenerated
       }

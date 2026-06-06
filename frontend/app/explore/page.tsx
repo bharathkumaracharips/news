@@ -296,7 +296,16 @@ function ExploreFeedContent() {
                     <span>{getRelativeTime(selectedArticle.publishedAt)}</span>
                   </div>
                   
-                  <h2 className={styles.modalTitle}>{selectedArticle.title}</h2>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem', gap: '1rem' }}>
+                    <h2 className={styles.modalTitle} style={{ margin: 0 }}>{selectedArticle.title}</h2>
+                    <Link 
+                      href={`/intelligence?id=${selectedArticle.id}`} 
+                      className={styles.intelligenceBtn}
+                      style={{ textDecoration: 'none' }}
+                    >
+                      Intelligence Mode ✨
+                    </Link>
+                  </div>
                   
                   {selectedArticle.summary && (
                     <div className={styles.modalSummary}>

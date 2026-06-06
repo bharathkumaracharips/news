@@ -205,7 +205,7 @@ function getSearchQueryFromTitle(title: string): string {
   const words = title.split(/\s+/).map(w => w.replace(/[^\w]/g, ''));
   const entities: string[] = [];
 
-  for (let i = 0; i < words.length; i++) {
+  for (let i = 1; i < words.length; i++) { // Skip i=0 to avoid false proper nouns from sentence casing
     const w = words[i];
     if (w.length > 2 && /^[A-Z]/.test(w)) {
       const lower = w.toLowerCase();
@@ -216,12 +216,17 @@ function getSearchQueryFromTitle(title: string): string {
   }
 
   if (entities.length < 2) {
+    const isNumberWord = (w: string) => /^(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|dozen|hundred|thousand|million|billion)$/.test(w);
+    
     const sigWords = title
       .toLowerCase()
       .replace(/[^\w\s]/g, ' ')
       .split(/\s+/)
-      .filter(w => w.length > 3 && !STOPWORDS.has(w));
-    return sigWords.slice(0, 3).join(' ');
+      .filter(w => w.length > 3 && !STOPWORDS.has(w) && !w.endsWith('ed') && !isNumberWord(w));
+    
+    // Sort by length descending to get the most identifying/descriptive words
+    sigWords.sort((a, b) => b.length - a.length);
+    return sigWords.slice(0, 3).join(' '); // 3 words for a broad, robust Google News search
   }
 
   return entities.slice(0, 4).join(' ');
@@ -241,7 +246,7 @@ export async function crawlAlternativePublishersForArticle(
 
     console.log(`📡 [ingestionJob]: Dynamically searching Google News for same event perspective stack: "${query}"`);
 
-    const searchUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-IN&gl=IN&ceid=IN:en`;
+    const searchUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query + ' when:10y')}&hl=en-IN&gl=IN&ceid=IN:en`;
     const discoveredArticles = await fetchAndNormalizeFeed(searchUrl, 'Google News Dynamic Search');
 
     if (discoveredArticles.length === 0) return;

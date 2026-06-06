@@ -24,6 +24,10 @@ interface IntelligenceData {
   catalyst: DBArticle;
   before: DBArticle[];
   after: DBArticle[];
+  industryImpact?: {
+    benefited: { sector: string; reason: string }[];
+    disadvantaged: { sector: string; reason: string }[];
+  };
   summary: string;
 }
 
@@ -74,7 +78,7 @@ function IntelligenceContent() {
         const json = await response.json();
         if (json.success) {
           setData(json.data);
-          setIsAiGenerated(!!json.isAiGenerated);
+          setIsAiGenerated(!!json.data.isAiGenerated);
         } else {
           throw new Error(json.message || 'Server error resolved');
         }
@@ -98,7 +102,7 @@ function IntelligenceContent() {
       const json = await response.json();
       if (json.success) {
         setData(json.data);
-        setIsAiGenerated(!!json.isAiGenerated);
+        setIsAiGenerated(!!json.data.isAiGenerated);
       } else {
         throw new Error(json.message || 'Failed to synthesize connections');
       }
@@ -145,10 +149,12 @@ function IntelligenceContent() {
     );
   }
 
-  const { catalyst, before, after, summary } = data;
+  const { catalyst, before, after, industryImpact, summary } = data;
 
   const positiveImpacts = after.filter(a => a.impactType === 'positive' || a.impactType === 'neutral');
   const negativeImpacts = after.filter(a => a.impactType === 'negative');
+  const aiBenefited = industryImpact?.benefited || [];
+  const aiDisadvantaged = industryImpact?.disadvantaged || [];
 
   return (
     <>
@@ -261,8 +267,8 @@ function IntelligenceContent() {
         }}>
           {(() => {
             const leftCount = before.length;
-            const posCount = positiveImpacts.length;
-            const negCount = negativeImpacts.length;
+            const posCount = positiveImpacts.length + aiBenefited.length;
+            const negCount = negativeImpacts.length + aiDisadvantaged.length;
             
             const maxNodes = Math.max(leftCount, posCount + negCount, 1);
             // Add some base height and scale with nodes
@@ -274,20 +280,30 @@ function IntelligenceContent() {
             // Compute positions
             const beforeNodes = before.map((art, i) => {
               const spacing = svgHeight / (leftCount + 1);
-              return { x: 150, y: spacing * (i + 1), article: art, type: 'baseline' };
+              return { x: 150, y: spacing * (i + 1), article: art, type: 'baseline', isArticle: true };
             });
 
-            const posNodes = positiveImpacts.map((art, i) => {
+            // Combine actual positive articles + AI generated benefited sectors
+            const combinedPositives = [
+              ...positiveImpacts.map(art => ({ article: art, isArticle: true })),
+              ...aiBenefited.map(ind => ({ article: { id: `ai-pos-${ind.sector}`, title: `${ind.sector} Expansion`, source: 'AI Projection', publishedAt: new Date().toISOString() }, isArticle: false }))
+            ];
+            const posNodes = combinedPositives.map((item, i) => {
               const spacing = centerY / (posCount + 1);
-              return { x: svgWidth - 150, y: spacing * (i + 1), article: art, type: 'positive' };
+              return { x: svgWidth - 150, y: spacing * (i + 1), ...item, type: 'positive' };
             });
 
-            const negNodes = negativeImpacts.map((art, i) => {
+            // Combine actual negative articles + AI generated disadvantaged sectors
+            const combinedNegatives = [
+              ...negativeImpacts.map(art => ({ article: art, isArticle: true })),
+              ...aiDisadvantaged.map(ind => ({ article: { id: `ai-neg-${ind.sector}`, title: `${ind.sector} Contraction`, source: 'AI Projection', publishedAt: new Date().toISOString() }, isArticle: false }))
+            ];
+            const negNodes = combinedNegatives.map((item, i) => {
               const spacing = (svgHeight - centerY) / (negCount + 1);
-              return { x: svgWidth - 150, y: centerY + spacing * (i + 1), article: art, type: 'negative' };
+              return { x: svgWidth - 150, y: centerY + spacing * (i + 1), ...item, type: 'negative' };
             });
 
-            const catalystNode = { x: centerX, y: centerY, article: catalyst, type: 'catalyst' };
+            const catalystNode = { x: centerX, y: centerY, article: catalyst, type: 'catalyst', isArticle: true };
 
             // Helper for drawing smooth curves
             const BezierCurve = ({ x1, y1, x2, y2, strokeColor }: any) => {
@@ -308,7 +324,7 @@ function IntelligenceContent() {
 
             // Helper for rendering article cards
             const ArticleCard = ({ node }: any) => {
-              const { x, y, article, type } = node;
+              const { x, y, article, type, isArticle } = node;
               const width = 220;
               const height = 75;
               
@@ -325,21 +341,26 @@ function IntelligenceContent() {
                 borderColor = '#ef4444';
               }
 
+              // Special styling for AI predicted nodes vs actual articles
+              const borderStyle = isArticle ? `1px solid ${borderColor}` : `1px dashed ${borderColor}`;
+              const opacity = isArticle ? 1 : 0.85;
+
               return (
                 <foreignObject x={x - width / 2} y={y - height / 2} width={width} height={height}>
                   <div 
-                    onClick={() => window.open(article.url, '_blank')}
+                    onClick={() => isArticle && window.open(article.url, '_blank')}
                     style={{
                       width: '100%', height: '100%', 
                       background: bgColor, 
-                      border: `1px solid ${borderColor}`,
+                      border: borderStyle,
+                      opacity: opacity,
                       borderRadius: '8px', 
                       padding: '0.6rem', 
                       boxSizing: 'border-box',
                       display: 'flex', 
                       flexDirection: 'column', 
                       justifyContent: 'center', 
-                      cursor: 'pointer',
+                      cursor: isArticle ? 'pointer' : 'default',
                       backdropFilter: 'blur(4px)',
                       transition: 'transform 0.2s, borderColor 0.2s'
                     }}
@@ -533,69 +554,117 @@ function IntelligenceContent() {
                 </div>
               ))}
 
-              {positiveImpacts.length === 0 && (
-                <div style={{
-                  padding: '2rem',
-                  background: 'rgba(255, 255, 255, 0.01)',
-                  border: '1px dashed #27272a',
-                  borderRadius: '8px',
-                  textAlign: 'center',
-                  color: '#71717a',
-                  fontSize: '0.85rem'
-                }}>
-                  Compiling positive cross-sector reports...
+                  {aiBenefited.map((ind, idx) => (
+                    <div key={`ai-pos-${idx}`} style={{
+                      background: 'rgba(16, 185, 129, 0.01)',
+                      border: '1px dashed rgba(16, 185, 129, 0.3)',
+                      borderRadius: '8px',
+                      padding: '1.25rem',
+                      display: 'flex',
+                      flexDirection: 'column'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                        <span style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: 700, textTransform: 'uppercase' }}>
+                          AI Projection
+                        </span>
+                        <span style={{ fontSize: '0.75rem', color: '#71717a' }}>Synthesized</span>
+                      </div>
+                      <h5 style={{ fontSize: '1rem', fontWeight: 600, color: '#fff', margin: '0 0 0.5rem 0', lineHeight: '1.3' }}>
+                        {ind.sector} Expansion
+                      </h5>
+                      <p style={{ fontSize: '0.85rem', color: '#a1a1aa', margin: '0 0 1rem 0', lineHeight: '1.5' }}>
+                        {ind.reason}
+                      </p>
+                    </div>
+                  ))}
+
+                  {positiveImpacts.length === 0 && aiBenefited.length === 0 && (
+                    <div style={{
+                      padding: '2rem',
+                      background: 'rgba(255, 255, 255, 0.01)',
+                      border: '1px dashed #27272a',
+                      borderRadius: '8px',
+                      textAlign: 'center',
+                      color: '#71717a',
+                      fontSize: '0.85rem'
+                    }}>
+                      Compiling positive cross-sector reports...
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          </div>
+              </div>
 
-          {/* Column 2: Disruptions & Legacy Drag */}
-          <div>
-            <h4 style={{
-              fontSize: '1.1rem',
-              fontWeight: 700,
-              color: '#f87171',
-              background: 'rgba(248, 113, 113, 0.1)',
-              padding: '0.75rem 1.25rem',
-              borderRadius: '6px',
-              borderLeft: '4px solid #ef4444',
-              marginBottom: '1.5rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem'
-            }}>
-              <span>🔴</span> Disrupted Sectors & Market Pressures
-            </h4>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-              {negativeImpacts.map((art) => (
-                <div key={art.id} style={{
-                  background: 'rgba(239, 68, 68, 0.02)',
-                  border: '1px solid rgba(239, 68, 68, 0.15)',
-                  borderRadius: '8px',
-                  padding: '1.25rem',
+              {/* Column 2: Disruptions & Legacy Drag */}
+              <div>
+                <h4 style={{
+                  fontSize: '1.1rem',
+                  fontWeight: 700,
+                  color: '#f87171',
+                  background: 'rgba(248, 113, 113, 0.1)',
+                  padding: '0.75rem 1.25rem',
+                  borderRadius: '6px',
+                  borderLeft: '4px solid #ef4444',
+                  marginBottom: '1.5rem',
                   display: 'flex',
-                  flexDirection: 'column'
+                  alignItems: 'center',
+                  gap: '0.5rem'
                 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                    <span style={{ fontSize: '0.75rem', color: '#ef4444', fontWeight: 700, textTransform: 'uppercase' }}>
-                      {art.category?.name || 'Sector Headwind'}
-                    </span>
-                    <span style={{ fontSize: '0.75rem', color: '#71717a' }}>{art.source}</span>
-                  </div>
-                  <h5 style={{ fontSize: '1rem', fontWeight: 600, color: '#fff', margin: '0 0 0.5rem 0', lineHeight: '1.3' }}>
-                    {art.title}
-                  </h5>
-                  <p style={{ fontSize: '0.85rem', color: '#a1a1aa', margin: '0 0 1rem 0', lineHeight: '1.5' }}>
-                    {art.summary || 'Incident reporting compliance hurdles or legacy pressure.'}
-                  </p>
-                  <a href={art.url} target="_blank" rel="noopener noreferrer" style={{ color: '#ef4444', textDecoration: 'none', fontSize: '0.8rem', fontWeight: 700, marginTop: 'auto', alignSelf: 'flex-end' }}>
-                    Full Report ↗
-                  </a>
-                </div>
-              ))}
+                  <span>🔴</span> Disrupted Sectors & Market Pressures
+                </h4>
 
-              {negativeImpacts.length === 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                  {negativeImpacts.map((art) => (
+                    <div key={art.id} style={{
+                      background: 'rgba(239, 68, 68, 0.02)',
+                      border: '1px solid rgba(239, 68, 68, 0.15)',
+                      borderRadius: '8px',
+                      padding: '1.25rem',
+                      display: 'flex',
+                      flexDirection: 'column'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                        <span style={{ fontSize: '0.75rem', color: '#ef4444', fontWeight: 700, textTransform: 'uppercase' }}>
+                          {art.category?.name || 'Sector Headwind'}
+                        </span>
+                        <span style={{ fontSize: '0.75rem', color: '#71717a' }}>{art.source}</span>
+                      </div>
+                      <h5 style={{ fontSize: '1rem', fontWeight: 600, color: '#fff', margin: '0 0 0.5rem 0', lineHeight: '1.3' }}>
+                        {art.title}
+                      </h5>
+                      <p style={{ fontSize: '0.85rem', color: '#a1a1aa', margin: '0 0 1rem 0', lineHeight: '1.5' }}>
+                        {art.summary || 'Incident reporting compliance hurdles or legacy pressure.'}
+                      </p>
+                      <a href={art.url} target="_blank" rel="noopener noreferrer" style={{ color: '#ef4444', textDecoration: 'none', fontSize: '0.8rem', fontWeight: 700, marginTop: 'auto', alignSelf: 'flex-end' }}>
+                        Full Report ↗
+                      </a>
+                    </div>
+                  ))}
+
+                  {aiDisadvantaged.map((ind, idx) => (
+                    <div key={`ai-neg-${idx}`} style={{
+                      background: 'rgba(239, 68, 68, 0.01)',
+                      border: '1px dashed rgba(239, 68, 68, 0.3)',
+                      borderRadius: '8px',
+                      padding: '1.25rem',
+                      display: 'flex',
+                      flexDirection: 'column'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                        <span style={{ fontSize: '0.75rem', color: '#ef4444', fontWeight: 700, textTransform: 'uppercase' }}>
+                          AI Projection
+                        </span>
+                        <span style={{ fontSize: '0.75rem', color: '#71717a' }}>Synthesized</span>
+                      </div>
+                      <h5 style={{ fontSize: '1rem', fontWeight: 600, color: '#fff', margin: '0 0 0.5rem 0', lineHeight: '1.3' }}>
+                        {ind.sector} Contraction
+                      </h5>
+                      <p style={{ fontSize: '0.85rem', color: '#a1a1aa', margin: '0 0 1rem 0', lineHeight: '1.5' }}>
+                        {ind.reason}
+                      </p>
+                    </div>
+                  ))}
+
+                  {negativeImpacts.length === 0 && aiDisadvantaged.length === 0 && (
                 <div style={{
                   padding: '2rem',
                   background: 'rgba(255, 255, 255, 0.01)',

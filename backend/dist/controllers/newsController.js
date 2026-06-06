@@ -460,10 +460,12 @@ const getArticleIntelligence = async (req, res) => {
         after = after.filter((art, index, self) => self.findIndex(t => t.source === art.source) === index);
         let summary = "Local AI intelligence engine connected. This is the timeline context.";
         let isAiGenerated = false;
+        let industryImpact = { benefited: [], disadvantaged: [] };
         if (req.query.useAi === 'true') {
             const perspectives = matchedArticles.filter((art, index, self) => self.findIndex(t => t.source === art.source) === index);
             const intelligence = await (0, intelligenceService_1.generateArticleIntelligence)(referenceArticle, perspectives, matchedArticles);
             summary = intelligence.synthesizedPerspectives;
+            industryImpact = intelligence.industryImpact;
             isAiGenerated = true;
             // Classify the impact of 'after' articles
             for (const article of after) {
@@ -483,6 +485,7 @@ const getArticleIntelligence = async (req, res) => {
                 catalyst: referenceArticle,
                 before,
                 after,
+                industryImpact,
                 summary,
                 isAiGenerated
             }
