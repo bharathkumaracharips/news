@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import newsRoutes from './routes/newsRoutes';
+import newspaperRoutes from './routes/newspaperRoutes';
 import { errorHandler } from './middleware/errorHandler';
 import { initIngestionScheduler, runIngestionNow, selfHealDatabaseArticles } from './jobs/ingestionJob';
 
@@ -17,6 +18,7 @@ app.use(express.json());
 
 // API Routes
 app.use('/api', newsRoutes);
+app.use('/api/newspapers', newspaperRoutes);
 
 // Base Health Check
 app.get('/health', (req, res) => {

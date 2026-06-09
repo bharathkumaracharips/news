@@ -12,6 +12,7 @@ export default function Navbar() {
     { name: 'Explore', path: '/explore' },
     { name: 'Intelligence', path: '/intelligence' },
     { name: 'Must Read', path: '/must-read' },
+    { name: 'Newspaper Wing', path: '/newspaper' },
   ];
 
   return (

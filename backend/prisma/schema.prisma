@@ -1,3 +1,4 @@
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -72,3 +73,20 @@ model Article {
   createdAt        DateTime    @default(now())
 }
 
+model Newspaper {
+  id          String             @id @default(uuid())
+  name        String
+  publishDate DateTime
+  createdAt   DateTime           @default(now())
+  articles    NewspaperArticle[]
+}
+
+model NewspaperArticle {
+  id          String    @id @default(uuid())
+  newspaperId String
+  newspaper   Newspaper @relation(fields: [newspaperId], references: [id], onDelete: Cascade)
+  title       String
+  content     String
+  category    String
+  createdAt   DateTime  @default(now())
+}
